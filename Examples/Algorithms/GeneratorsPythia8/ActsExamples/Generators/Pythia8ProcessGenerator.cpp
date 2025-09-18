@@ -31,8 +31,9 @@ ActsExamples::Pythia8Generator::Pythia8Generator(const Config& cfg,
       m_logger(Acts::getDefaultLogger("Pythia8Generator", lvl)),
       m_pythia8(std::make_unique<Pythia8::Pythia>("", false)) {
   // disable all output by default but allow reenable via config
-  m_pythia8->settings.flag("Print:quiet", true);
+  m_pythia8->settings.flag("Print:quiet", false);
   for (const auto& setting : m_cfg.settings) {
+    std::cout << setting << std::endl;
     ACTS_VERBOSE("use Pythia8 setting '" << setting << "'");
     m_pythia8->readString(setting.c_str());
   }
@@ -61,6 +62,24 @@ ActsExamples::SimParticleContainer ActsExamples::Pythia8Generator::operator()(
   m_pythia8->rndm.rndmEnginePtr(&rndmEngine);
   m_pythia8->next();
 
+  // reject all events with a Ds meson
+  bool hasTau3Mu = false;
+  int muFromTau = 0;
+  for (int ip = 0; ip < m_pythia8->event.size(); ++ip) {
+      const auto& genParticle = m_pythia8->event[ip];
+      const auto& genParticleMother = m_pythia8->event[genParticle.mother1()];
+      if (fabs(genParticle.id()) == 13 && fabs(genParticleMother.id())  == 15){
+          muFromTau++;
+      }
+  } 
+  if (muFromTau >= 3) hasTau3Mu = true;
+  //std::cout << muFromTau << std::endl;
+  if (!hasTau3Mu){
+        SimParticleContainer out;
+        out.insert(generated.begin(), generated.end());
+        return out;     
+  }
+  std::cout << "here is one" << std::endl;
   // convert generated final state particles into internal format
   for (int ip = 0; ip < m_pythia8->event.size(); ++ip) {
     const auto& genParticle = m_pythia8->event[ip];

@@ -83,7 +83,9 @@ ActsExamples::EventGenerator::Config ActsExamples::Options::readPythia8Options(
     hard.pdgBeam1 = pdgBeam1;
     hard.cmsEnergy = cmsEnergy;
     hard.settings = vars["gen-hard-process"].as<std::vector<std::string>>();
-
+    for (int i = 0; i < hard.settings.size(); i++){
+        std::cout << hard.settings.at(i) << std::endl;
+    }
     cfg.generators.push_back(
         {std::make_shared<FixedMultiplicityGenerator>(nhard), vertexGen,
          std::make_shared<Pythia8Generator>(hard, lvl)});
