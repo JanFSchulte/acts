@@ -1,20 +1,19 @@
 rules:
   - required_checks:
       - Lint PR / Validate PR title
-      - WIP
-      - milestone-set
     required_pattern:
-      - "review-required: *"
+      - "policy-bot: *"
 
   - branch_filter:
      - "main"
      - "develop/*"
     paths_ignore:
-     - "docs/*" 
+     - "docs/*"
 
     required_checks:
      - Docs / docs
      - Analysis / build_debug
+     - SonarCloud Code Analysis
 
     required_pattern:
      - "Builds / *"
@@ -25,6 +24,6 @@ rules:
      - "main"
      - "develop/*"
     paths:
-     - "docs/*" 
+     - "docs/*"
     required_checks:
      - Docs / docs

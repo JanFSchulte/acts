@@ -1,16 +1,15 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Surfaces/SurfaceError.hpp"
-#include "Acts/Utilities/Helpers.hpp"
 #include "ActsFatras/Digitization/DigitizationData.hpp"
 
 #include <array>
@@ -27,7 +26,7 @@ namespace ActsFatras {
 /// @param channels The channels from one cluster
 ///
 /// @return A cluster containing the parameter set and cluster size
-template <typename signal_t, size_t kSize>
+template <typename signal_t, std::size_t kSize>
 const std::vector<Channel<signal_t, kSize>> mergeChannels(
     const std::vector<Channel<signal_t, kSize>>& channels) {
   using Channel = Channel<signal_t, kSize>;

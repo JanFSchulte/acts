@@ -1,82 +1,37 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/Plugins/Json/ActsJson.hpp"
 #include "Acts/Plugins/Json/UtilitiesJsonConverter.hpp"
+#include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 #include "Acts/Utilities/BinUtility.hpp"
-#include "Acts/Utilities/BinningData.hpp"
+#include "Acts/Utilities/BinningType.hpp"
 
+#include <cmath>
 #include <fstream>
-#include <iostream>
+#include <initializer_list>
+#include <numbers>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <nlohmann/json.hpp>
+
+#include "EqualityHelpers.hpp"
 
 using namespace Acts;
 
 BOOST_AUTO_TEST_SUITE(UtilitiesJsonConverter)
 
-namespace {
-/// Check whether the BinningData objects are equal
-///
-/// @param ba The first BinningData object
-/// @param bb The second BinningData object
-/// @param tolerance a tolerance parameter
-///
-/// @return a boolean
-bool isEqual(const BinningData& ba, const BinningData& bb, float tolerance) {
-  bool equalBool = (ba.type == bb.type) and (ba.option == bb.option) and
-                   (ba.binvalue == bb.binvalue) and (ba.zdim == bb.zdim) and
-                   (ba.subBinningAdditive == bb.subBinningAdditive);
-
-  bool equalRange = (std::abs(ba.min - bb.min) < tolerance) and
-                    (std::abs(ba.max - bb.max) < tolerance) and
-                    (std::abs(ba.step - bb.step) < tolerance);
-
-  bool euqalStructure =
-      (ba.subBinningData != nullptr)
-          ? isEqual(*ba.subBinningData, *bb.subBinningData, tolerance)
-          : (bb.subBinningData == nullptr);
-
-  bool equalBoundaries = (ba.boundaries().size() == bb.boundaries().size());
-  if (equalBoundaries) {
-    for (size_t ib = 0; ib < ba.boundaries().size(); ++ib) {
-      equalBoundaries =
-          (std::abs(ba.boundaries()[ib] - bb.boundaries()[ib]) < tolerance);
-      if (not equalBoundaries) {
-        break;
-      }
-    }
-  }
-  return equalBool and equalRange and euqalStructure;
-}
-
-/// Check whether the BinUtility ojbects are equal
-///
-/// @param ba The first BinUtility object
-/// @param bb the second BinUtility object
-/// @param tolerance a tolerance parameter
-///
-/// @return a bollean if equal
-bool isEqual(const BinUtility& ba, const BinUtility& bb, float tolerance) {
-  bool equal = (ba.binningData().size() == bb.binningData().size());
-  if (equal) {
-    for (size_t ib = 0; ib < ba.binningData().size(); ++ib) {
-      equal = isEqual(ba.binningData()[ib], bb.binningData()[ib], tolerance);
-    }
-  }
-  return equal;
-}
-
-}  // namespace
-
 BOOST_AUTO_TEST_CASE(BinUtilityRoundTripTests) {
-  BinUtility reference(2, 0., 4., open, binR);
+  BinUtility reference(2, 0., 4., open, AxisDirection::AxisR);
 
   std::ofstream out;
 
@@ -100,7 +55,8 @@ BOOST_AUTO_TEST_CASE(BinUtilityRoundTripTests) {
   BOOST_CHECK(isEqual(reference, test, 0.0001));
 
   // Increase to two dimensions
-  reference += BinUtility(10., -M_PI, M_PI, closed, binPhi);
+  reference += BinUtility(10., -std::numbers::pi, std::numbers::pi, closed,
+                          AxisDirection::AxisPhi);
   nlohmann::json jtwoDimOut;
   to_json(jtwoDimOut, reference);
   out.open("BinUtility_2D.json");
@@ -121,7 +77,7 @@ BOOST_AUTO_TEST_CASE(BinUtilityRoundTripTests) {
 
   // Increase to three dimensions
   std::vector<float> boundaries = {-4., -1.5, 0., 10.};
-  reference += BinUtility(boundaries, open, binZ);
+  reference += BinUtility(boundaries, open, AxisDirection::AxisZ);
   nlohmann::json jthreeDimOut;
   to_json(jthreeDimOut, reference);
   out.open("BinUtility_3D.json");
@@ -166,6 +122,18 @@ BOOST_AUTO_TEST_CASE(BinUtilityRoundTripTests) {
   from_json(jtransformIn, test);
 
   BOOST_CHECK(isEqual(reference, test, 0.0001));
+}
+
+BOOST_AUTO_TEST_CASE(Range1DRoundTrip) {
+  Range1D<double> r(-10., 100.);
+
+  nlohmann::json jrange;
+  jrange["range"] = r;
+
+  Range1D<double> rIn = jrange["range"];
+
+  CHECK_CLOSE_ABS(rIn.min(), -10., 10e-5);
+  CHECK_CLOSE_ABS(rIn.max(), 100., 10e-5);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

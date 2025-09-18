@@ -1,18 +1,20 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 ///////////////////////////////////////////////////////////////////
 // BinnedArrayXD.h, Acts project
 ///////////////////////////////////////////////////////////////////
 
 #pragma once
+
 #include "Acts/Utilities/BinUtility.hpp"
 #include "Acts/Utilities/BinnedArray.hpp"
+#include "Acts/Utilities/Helpers.hpp"
 
 #include <array>
 #include <iostream>
@@ -39,7 +41,7 @@ class BinnedArrayXD : public BinnedArray<T> {
   /// Constructor for single object
   ///
   /// @tparam object is the single object
-  BinnedArrayXD(T object)
+  explicit BinnedArrayXD(T object)
       : BinnedArray<T>(),
         m_objectGrid(
             1, std::vector<std::vector<T>>(1, std::vector<T>(1, nullptr))),
@@ -50,7 +52,7 @@ class BinnedArrayXD : public BinnedArray<T> {
   }
 
   /// Constructor with std::vector and a BinUtility
-  /// - fills the internal data structur
+  /// - fills the internal data structure
   ///
   /// @param tapvector is a vector of object and binning position
   /// @param bu is the unique bin utility for this binned array
@@ -74,8 +76,7 @@ class BinnedArrayXD : public BinnedArray<T> {
         /// fill the data
         m_objectGrid[bins[2]][bins[1]][bins[0]] = tap.first;
         /// fill the unique m_arrayObjects
-        if (std::find(m_arrayObjects.begin(), m_arrayObjects.end(),
-                      tap.first) == m_arrayObjects.end()) {
+        if (!rangeContainsValue(m_arrayObjects, tap.first)) {
           m_arrayObjects.push_back(tap.first);
         }
       }
@@ -93,7 +94,7 @@ class BinnedArrayXD : public BinnedArray<T> {
         m_arrayObjects(),
         m_binUtility(std::move(bu)) {
     // get the total dimension
-    size_t objects =
+    std::size_t objects =
         m_binUtility->bins(0) * m_binUtility->bins(1) * m_binUtility->bins(2);
     /// reserve the right amount of data
     m_arrayObjects.reserve(objects);
@@ -101,12 +102,9 @@ class BinnedArrayXD : public BinnedArray<T> {
     for (auto& o2 : m_objectGrid) {
       for (auto& o1 : o2) {
         for (auto& o0 : o1) {
-          if (o0) {
-            /// fill the unique m_arrayObjects
-            if (std::find(m_arrayObjects.begin(), m_arrayObjects.end(), o0) ==
-                m_arrayObjects.end()) {
-              m_arrayObjects.push_back(o0);
-            }
+          /// fill the unique m_arrayObjects
+          if (o0 && !rangeContainsValue(m_arrayObjects, o0)) {
+            m_arrayObjects.push_back(o0);
           }
         }
       }
@@ -131,9 +129,10 @@ class BinnedArrayXD : public BinnedArray<T> {
   /// @param bins is the bin triple filled during this access
   ///
   /// @return is the object in that bin
-  T object(const Vector2& lposition, std::array<size_t, 3>& bins) const final {
+  T object(const Vector2& lposition,
+           std::array<std::size_t, 3>& bins) const final {
     if (m_binUtility) {
-      size_t bdim = m_binUtility->dimensions();
+      std::size_t bdim = m_binUtility->dimensions();
       bins[2] = bdim > 2 ? m_binUtility->bin(lposition, 2) : 0;
       bins[1] = bdim > 1 ? m_binUtility->bin(lposition, 1) : 0;
       bins[0] = m_binUtility->bin(lposition, 0);
@@ -144,7 +143,7 @@ class BinnedArrayXD : public BinnedArray<T> {
 
   // satisfy overload / override
   T object(const Vector2& lposition) const override {
-    std::array<size_t, 3> bins{};
+    std::array<std::size_t, 3> bins{};
     return object(lposition, bins);
   }
 
@@ -154,9 +153,10 @@ class BinnedArrayXD : public BinnedArray<T> {
   /// @param bins is the bins triple filled during access
   ///
   /// @return is the object in that bin
-  T object(const Vector3& position, std::array<size_t, 3>& bins) const final {
+  T object(const Vector3& position,
+           std::array<std::size_t, 3>& bins) const final {
     if (m_binUtility) {
-      size_t bdim = m_binUtility->dimensions();
+      std::size_t bdim = m_binUtility->dimensions();
       bins[2] = bdim > 2 ? m_binUtility->bin(position, 2) : 0;
       bins[1] = bdim > 1 ? m_binUtility->bin(position, 1) : 0;
       bins[0] = m_binUtility->bin(position, 0);
@@ -167,11 +167,11 @@ class BinnedArrayXD : public BinnedArray<T> {
 
   // satisfy overload / override
   T object(const Vector3& position) const override {
-    std::array<size_t, 3> bins{};
+    std::array<std::size_t, 3> bins{};
     return object(position, bins);
   }
 
-  /// Return all unqiue object
+  /// Return all unique object
   /// @return vector of unique array objects
   const std::vector<T>& arrayObjects() const final { return m_arrayObjects; }
 
@@ -194,4 +194,4 @@ class BinnedArrayXD : public BinnedArray<T> {
   /// binUtility for retrieving and filling the Array
   std::unique_ptr<const BinUtility> m_binUtility;
 };
-}  // end of namespace Acts
+}  // namespace Acts

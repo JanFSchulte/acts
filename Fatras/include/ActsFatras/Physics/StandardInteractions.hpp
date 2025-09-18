@@ -1,27 +1,36 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include "Acts/Definitions/PdgParticle.hpp"
 #include "ActsFatras/Kernel/ContinuousProcess.hpp"
 #include "ActsFatras/Kernel/InteractionList.hpp"
+#include "ActsFatras/Kernel/PointLikeProcess.hpp"
 #include "ActsFatras/Physics/ElectroMagnetic/BetheBloch.hpp"
 #include "ActsFatras/Physics/ElectroMagnetic/BetheHeitler.hpp"
+#include "ActsFatras/Physics/ElectroMagnetic/PhotonConversion.hpp"
 #include "ActsFatras/Physics/ElectroMagnetic/Scattering.hpp"
 #include "ActsFatras/Selectors/KinematicCasts.hpp"
 #include "ActsFatras/Selectors/ParticleSelectors.hpp"
 #include "ActsFatras/Selectors/SelectorHelpers.hpp"
 
 namespace ActsFatras {
+namespace Casts {
+struct P;
+}  // namespace Casts
+
 namespace detail {
 
 /// Select electrons and positrons only.
 using SelectElectronLike = AbsPdgSelector<Acts::PdgParticle::eElectron>;
+/// Select photons only.
+using SelectPhotonLike = AbsPdgSelector<Acts::PdgParticle::eGamma>;
 /// Select particles above a minimum absolute momentum.
 using SelectPMin = Min<Casts::P>;
 
@@ -40,6 +49,10 @@ using StandardBetheBloch =
 using StandardBetheHeitler =
     ContinuousProcess<BetheHeitler, SelectElectronLike, SelectPMin, SelectPMin>;
 
+/// Handle photon conversions with a pair of an electron and a positron emitted.
+using StandardPhotonConversion =
+    PointLikeProcess<PhotonConversion, SelectPhotonLike, SelectPMin,
+                     SelectPMin>;
 }  // namespace detail
 
 /// Standard set of electro-magnetic interactions for charged particles.
@@ -63,5 +76,19 @@ using StandardChargedElectroMagneticInteractions =
 /// @param minimumAbsMomentum lower p cut on output particles
 StandardChargedElectroMagneticInteractions
 makeStandardChargedElectroMagneticInteractions(double minimumAbsMomentum);
+
+/// Standard set of electro-magnetic interactions for neutral particles.
+using StandardNeutralElectroMagneticInteractions =
+    InteractionList<detail::StandardPhotonConversion>;
+
+/// Construct the standard electro-magnetic interactions for neutral particles.
+///
+/// @warning The list has no cuts on input particle charge or kinematics, i.e.
+///          it relies on the simulator to preselect relevant charged particles
+///          before application.
+///
+/// @param minimumAbsMomentum lower p cut on output particles
+StandardNeutralElectroMagneticInteractions
+makeStandardNeutralElectroMagneticInteractions(double minimumAbsMomentum);
 
 }  // namespace ActsFatras

@@ -1,36 +1,39 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include "Acts/Geometry/GeometryContext.hpp"
+#include "Acts/Geometry/GeometryIdentifier.hpp"
+#include "Acts/MagneticField/MagneticFieldContext.hpp"
+#include "Acts/Material/MaterialInteraction.hpp"
 #include "Acts/Material/SurfaceMaterialMapper.hpp"
+#include "Acts/Material/TrackingGeometryMaterial.hpp"
 #include "Acts/Material/VolumeMaterialMapper.hpp"
 #include "Acts/Utilities/Logger.hpp"
-#include "ActsExamples/Framework/BareAlgorithm.hpp"
+#include "ActsExamples/Framework/DataHandle.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
+#include "ActsExamples/Framework/ProcessCode.hpp"
 #include "ActsExamples/MaterialMapping/IMaterialWriter.hpp"
 
 #include <climits>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <map>
 #include <memory>
-#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace Acts {
-
 class TrackingGeometry;
-class ISurfaceMaterial;
-class IVolumeMaterial;
-
-using SurfaceMaterialMap =
-    std::map<GeometryIdentifier, std::shared_ptr<const ISurfaceMaterial>>;
-
-using VolumeMaterialMap =
-    std::map<GeometryIdentifier, std::shared_ptr<const IVolumeMaterial>>;
-
-using DetectorMaterialMaps = std::pair<SurfaceMaterialMap, VolumeMaterialMap>;
 }  // namespace Acts
 
 namespace ActsExamples {
@@ -50,7 +53,7 @@ namespace ActsExamples {
 ///
 /// It therefore saves the mapping state/cache as a private member variable
 /// and is designed to be executed in a single threaded mode.
-class MaterialMapping : public ActsExamples::BareAlgorithm {
+class MaterialMapping : public IAlgorithm {
  public:
   /// @class nested Config class
   /// of the MaterialMapping algorithm
@@ -62,7 +65,7 @@ class MaterialMapping : public ActsExamples::BareAlgorithm {
     std::reference_wrapper<const Acts::MagneticFieldContext> magFieldContext;
 
     /// Input collection
-    std::string collection = "material_tracks";
+    std::string inputMaterialTracks = "material_tracks";
 
     /// The material collection to be stored
     std::string mappingMaterialCollection = "mapped_material_tracks";
@@ -85,12 +88,8 @@ class MaterialMapping : public ActsExamples::BareAlgorithm {
   ///
   /// @param cfg The configuration struct carrying the used tools
   /// @param level The output logging level
-  MaterialMapping(const Config& cfg,
-                  Acts::Logging::Level level = Acts::Logging::INFO);
-
-  /// Destructor
-  /// - it also writes out the file
-  ~MaterialMapping() override;
+  explicit MaterialMapping(const Config& cfg,
+                           Acts::Logging::Level level = Acts::Logging::INFO);
 
   /// Framework execute method
   ///
@@ -98,11 +97,15 @@ class MaterialMapping : public ActsExamples::BareAlgorithm {
   ActsExamples::ProcessCode execute(
       const AlgorithmContext& context) const override;
 
+  // Write out the file
+  ProcessCode finalize() override;
+
   /// Return the parameters to optimised the material map for a given surface
   /// Those parameters are the variance and the number of track for each bin
   ///
-  /// @param surfaceID the ID of the surface of intrest
-  std::vector<std::pair<double, int>> scoringParameters(uint64_t surfaceID);
+  /// @param surfaceID the ID of the surface of interest
+  std::vector<std::pair<double, int>> scoringParameters(
+      std::uint64_t surfaceID);
 
   /// Readonly access to the config
   const Config& config() const { return m_cfg; }
@@ -113,6 +116,12 @@ class MaterialMapping : public ActsExamples::BareAlgorithm {
       m_mappingState;  //!< Material mapping state
   Acts::VolumeMaterialMapper::State
       m_mappingStateVol;  //!< Material mapping state
+                          //
+
+  ReadDataHandle<std::unordered_map<std::size_t, Acts::RecordedMaterialTrack>>
+      m_inputMaterialTracks{this, "InputMaterialTracks"};
+  WriteDataHandle<std::unordered_map<std::size_t, Acts::RecordedMaterialTrack>>
+      m_outputMaterialTracks{this, "OutputMaterialTracks"};
 };
 
 }  // namespace ActsExamples

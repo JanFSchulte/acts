@@ -1,25 +1,24 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include <boost/test/data/test_case.hpp>
-#include <boost/test/tools/output_test_stream.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Utilities/AnnealingUtility.hpp"
 
 #include <iostream>
+#include <vector>
 
-namespace Acts {
-namespace Test {
+namespace Acts::Test {
 
 BOOST_AUTO_TEST_CASE(annealing_tool_singleChi2_tests) {
   std::vector<double> temperatures{64., 16., 4., 2., 1.5, 1.};
-  AnnealingUtility::Config config(temperatures);
+  AnnealingUtility::Config config;
+  config.setOfTemperatures = temperatures;
   AnnealingUtility annealingTool(config);
 
   AnnealingUtility::State state;
@@ -112,7 +111,8 @@ BOOST_AUTO_TEST_CASE(annealing_tool_multiChi2_tests) {
                               3.5, 5.8, 11.0, 1.1, 3.5,  6.7};
 
   std::vector<double> temperatures{64., 16., 4., 2., 1.5, 1.};
-  AnnealingUtility::Config config(temperatures);
+  AnnealingUtility::Config config;
+  config.setOfTemperatures = {64., 16., 4., 2., 1.5, 1.};
   AnnealingUtility annealingTool(config);
 
   AnnealingUtility::State state;
@@ -173,5 +173,4 @@ BOOST_AUTO_TEST_CASE(annealing_tool_multiChi2_tests) {
   }
 }
 
-}  // namespace Test
-}  // namespace Acts
+}  // namespace Acts::Test

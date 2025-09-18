@@ -1,20 +1,18 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-#pragma once
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Plugins/ActSVG/LayerSvgConverter.hpp"
 #include "Acts/Plugins/ActSVG/SvgUtils.hpp"
-#include "actsvg/core.hpp"
-#include "actsvg/meta.hpp"
+#include <actsvg/core.hpp>
+#include <actsvg/meta.hpp>
 
 namespace Acts {
 
@@ -31,8 +29,6 @@ struct Options {
   std::string prefix = "";
   /// Write the layer conversion options
   GeometryHierarchyMap<LayerConverter::Options> layerOptions;
-  /// ACTS log level
-  Logging::Level logLevel = Logging::INFO;
 };
 
 /// State object to collect geometry-wise information
@@ -73,8 +69,8 @@ struct Options {
 
   TrackingGeometryConverter::Options trackingGeometryOptions;
 
-  std::array<std::array<Acts::ActsScalar, 2>, 2> rzAxes;
-  std::vector<ActsScalar> rzEtaLines;
+  std::array<std::array<double, 2>, 2> rzAxes;
+  std::vector<double> rzEtaLines;
 };
 
 /// Convert into xy and zr projections only
@@ -90,6 +86,16 @@ std::array<actsvg::svg::object, 2> convert(
     const GeometryContext& gctx, const Acts::TrackingGeometry& tGeometry,
     const Options& cOptions);
 }  // namespace TrackingGeometryProjections
+
+[[nodiscard("Not drawing svg outputs")]]
+std::vector<actsvg::svg::object> drawTrackingGeometry(
+    const GeometryContext& gctx, const TrackingGeometry& tGeometry,
+    std::variant<actsvg::views::x_y, actsvg::views::z_r> view,
+    bool drawSurfaces = true, bool highlightMaterial = false);
+
+[[nodiscard("Not drawing svg outputs")]]
+std::vector<actsvg::svg::object> drawSurfaceArrays(
+    const Acts::GeometryContext& gctx, const TrackingGeometry& tGeometry);
 
 }  // namespace Svg
 

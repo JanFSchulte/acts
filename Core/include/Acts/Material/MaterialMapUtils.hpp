@@ -1,20 +1,22 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/Material/InterpolatedMaterialMap.hpp"
-#include "Acts/Utilities/detail/AxisFwd.hpp"
-#include "Acts/Utilities/detail/Grid.hpp"
+#include "Acts/Material/Material.hpp"
+#include "Acts/Utilities/AxisDefinitions.hpp"
+#include "Acts/Utilities/Grid.hpp"
 
 #include <array>
+#include <cstddef>
 #include <functional>
 #include <vector>
 
@@ -42,7 +44,7 @@ class Material;
 ///
 /// In this case the function would look like:
 /// @code
-/// [](std::array<size_t, 2> binsRZ, std::array<size_t, 2> nBinsRZ) {
+/// [](std::array<std::size_t, 2> binsRZ, std::array<std::size_t, 2> nBinsRZ) {
 ///    return (binsRZ.at(0) * nBinsRZ.at(1) + binsRZ.at(1));
 /// }
 /// @endcode
@@ -57,14 +59,16 @@ class Material;
 /// @note The function localToGlobalBin determines how the material was
 /// stored in the vector in respect to the grid values
 /// @param [in] lengthUnit The unit of the grid points
-MaterialMapper<detail::Grid<Material::ParametersVector, detail::EquidistantAxis,
-                            detail::EquidistantAxis>>
-materialMapperRZ(const std::function<size_t(std::array<size_t, 2> binsRZ,
-                                            std::array<size_t, 2> nBinsRZ)>&
-                     materialVectorToGridMapper,
-                 std::vector<double> rPos, std::vector<double> zPos,
-                 const std::vector<Acts::Material>& material,
-                 double lengthUnit = UnitConstants::mm);
+MaterialMapper<
+    Grid<Material::ParametersVector, Axis<Acts::AxisType::Equidistant>,
+         Axis<Acts::AxisType::Equidistant>>>
+materialMapperRZ(
+    const std::function<std::size_t(std::array<std::size_t, 2> binsRZ,
+                                    std::array<std::size_t, 2> nBinsRZ)>&
+        materialVectorToGridMapper,
+    std::vector<double> rPos, std::vector<double> zPos,
+    const std::vector<Acts::Material>& material,
+    double lengthUnit = UnitConstants::mm);
 
 /// Method to setup the MaterialMapper
 /// @param [in] materialVectorToGridMapper Function mapping the vector of
@@ -87,7 +91,8 @@ materialMapperRZ(const std::function<size_t(std::array<size_t, 2> binsRZ,
 ///
 /// In this case the function would look like:
 /// @code
-/// [](std::array<size_t, 3> binsXYZ, std::array<size_t, 3> nBinsXYZ) {
+/// [](std::array<std::size_t, 3> binsXYZ, std::array<std::size_t, 3> nBinsXYZ)
+/// {
 ///   return (binsXYZ.at(0) * (nBinsXYZ.at(1) * nBinsXYZ.at(2))
 ///        + binsXYZ.at(1) * nBinsXYZ.at(2)
 ///        + binsXYZ.at(2));
@@ -107,14 +112,15 @@ materialMapperRZ(const std::function<size_t(std::array<size_t, 2> binsRZ,
 /// @note The function localToGlobalBin determines how the material was
 /// stored in the vector in respect to the grid values
 /// @param [in] lengthUnit The unit of the grid points
-MaterialMapper<detail::Grid<Material::ParametersVector, detail::EquidistantAxis,
-                            detail::EquidistantAxis, detail::EquidistantAxis>>
-materialMapperXYZ(const std::function<size_t(std::array<size_t, 3> binsXYZ,
-                                             std::array<size_t, 3> nBinsXYZ)>&
-                      materialVectorToGridMapper,
-                  std::vector<double> xPos, std::vector<double> yPos,
-                  std::vector<double> zPos,
-                  const std::vector<Material>& material,
-                  double lengthUnit = UnitConstants::mm);
+MaterialMapper<
+    Grid<Material::ParametersVector, Axis<Acts::AxisType::Equidistant>,
+         Axis<Acts::AxisType::Equidistant>, Axis<Acts::AxisType::Equidistant>>>
+materialMapperXYZ(
+    const std::function<std::size_t(std::array<std::size_t, 3> binsXYZ,
+                                    std::array<std::size_t, 3> nBinsXYZ)>&
+        materialVectorToGridMapper,
+    std::vector<double> xPos, std::vector<double> yPos,
+    std::vector<double> zPos, const std::vector<Material>& material,
+    double lengthUnit = UnitConstants::mm);
 
 }  // namespace Acts

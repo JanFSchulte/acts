@@ -8,8 +8,9 @@ dependencies and are thus disabled by default.
 .. toctree::
    :maxdepth: 1
 
-   autodiff
    dd4hep
-   exatrkx
+   gnn
+   geant4
    json
-   tgeo
+   root
+   MLAlgorithms

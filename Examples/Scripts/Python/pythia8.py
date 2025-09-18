@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-from typing import Optional, Union
 from pathlib import Path
-from collections.abc import Iterable
 
 import acts
 import acts.examples
@@ -15,6 +13,7 @@ def runPythia8(
     outputRoot: bool = True,
     outputCsv: bool = True,
     s: acts.examples.Sequencer = None,
+    vtxGen=None,
 ):
     # Preliminaries
     rnd = acts.examples.RandomNumbers()
@@ -30,6 +29,7 @@ def runPythia8(
         rnd=rnd,
         outputDirCsv=outputDir / "csv" if outputCsv else None,
         outputDirRoot=outputDir if outputRoot else None,
+        vtxGen=vtxGen,
     )
 
     return s

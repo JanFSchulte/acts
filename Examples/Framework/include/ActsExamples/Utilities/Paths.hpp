@@ -1,13 +1,14 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,7 +31,7 @@ std::string joinPaths(const std::string& dir, const std::string& name);
 /// @params name basic filename
 /// @params event event number
 std::string perEventFilepath(const std::string& dir, const std::string& name,
-                             size_t event);
+                             std::size_t event);
 
 /// Determine the range of available events in a directory of per-event files.
 ///
@@ -40,7 +41,7 @@ std::string perEventFilepath(const std::string& dir, const std::string& name,
 /// @returns {0, 0} when no matching files could be found
 ///
 /// Event files must be named `[<dir>/]event<XXXXXXXXX>-<name>` to be considered
-std::pair<size_t, size_t> determineEventFilesRange(const std::string& dir,
-                                                   const std::string& name);
+std::pair<std::size_t, std::size_t> determineEventFilesRange(
+    const std::string& dir, const std::string& name);
 
 }  // namespace ActsExamples

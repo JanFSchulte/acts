@@ -1,36 +1,37 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include <boost/test/data/test_case.hpp>
-#include <boost/test/tools/output_test_stream.hpp>
 #include <boost/test/unit_test.hpp>
 
-#include "Acts/Geometry/CuboidVolumeBounds.hpp"
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Geometry/ApproachDescriptor.hpp"
 #include "Acts/Geometry/GenericApproachDescriptor.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/Layer.hpp"
-#include "Acts/Geometry/SurfaceArrayCreator.hpp"
 #include "Acts/Surfaces/PlaneSurface.hpp"
 #include "Acts/Surfaces/RectangleBounds.hpp"
+#include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Surfaces/SurfaceArray.hpp"
 
+#include <cmath>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "../Surfaces/SurfaceStub.hpp"
 #include "LayerStub.hpp"
 
-using boost::test_tools::output_test_stream;
-namespace utf = boost::unit_test;
-
-namespace Acts {
-
-namespace Test {
-
+namespace Acts::Test {
 // Create a test context
 GeometryContext tgContext = GeometryContext();
+}  // namespace Acts::Test
 
-namespace Layers {
+namespace Acts::Test::Layers {
 
 BOOST_AUTO_TEST_SUITE(Layers)
 
@@ -98,7 +99,5 @@ BOOST_AUTO_TEST_CASE(LayerProperties) {
 }
 
 BOOST_AUTO_TEST_SUITE_END()
-}  // namespace Layers
-}  // namespace Test
 
-}  // namespace Acts
+}  // namespace Acts::Test::Layers

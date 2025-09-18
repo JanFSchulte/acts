@@ -1,40 +1,39 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Geometry/CuboidVolumeBuilder.hpp"
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/Definitions/Units.hpp"
 #include "Acts/Geometry/BoundarySurfaceFace.hpp"
 #include "Acts/Geometry/CuboidVolumeBounds.hpp"
-#include "Acts/Geometry/Layer.hpp"
+#include "Acts/Geometry/Extent.hpp"
 #include "Acts/Geometry/LayerArrayCreator.hpp"
 #include "Acts/Geometry/LayerCreator.hpp"
-#include "Acts/Geometry/PlaneLayer.hpp"
+#include "Acts/Geometry/ProtoLayer.hpp"
 #include "Acts/Geometry/SurfaceArrayCreator.hpp"
 #include "Acts/Geometry/TrackingGeometry.hpp"
 #include "Acts/Geometry/TrackingVolume.hpp"
-#include "Acts/Geometry/detail/DefaultDetectorElementBase.hpp"
-#include "Acts/Material/HomogeneousSurfaceMaterial.hpp"
-#include "Acts/Material/MaterialSlab.hpp"
+#include "Acts/Geometry/Volume.hpp"
 #include "Acts/Surfaces/PlaneSurface.hpp"
 #include "Acts/Surfaces/RectangleBounds.hpp"
 #include "Acts/Surfaces/Surface.hpp"
-#include "Acts/Surfaces/SurfaceArray.hpp"
 #include "Acts/Utilities/BinUtility.hpp"
-#include "Acts/Utilities/BinnedArray.hpp"
 #include "Acts/Utilities/BinnedArrayXD.hpp"
 #include "Acts/Utilities/BinningData.hpp"
 #include "Acts/Utilities/Logger.hpp"
 
+#include <algorithm>
 #include <limits>
+#include <stdexcept>
 
-std::shared_ptr<const Acts::Surface> Acts::CuboidVolumeBuilder::buildSurface(
+namespace Acts {
+
+std::shared_ptr<const Surface> CuboidVolumeBuilder::buildSurface(
     const GeometryContext& /*gctx*/,
     const CuboidVolumeBuilder::SurfaceConfig& cfg) const {
   std::shared_ptr<PlaneSurface> surface;
@@ -55,9 +54,8 @@ std::shared_ptr<const Acts::Surface> Acts::CuboidVolumeBuilder::buildSurface(
   return surface;
 }
 
-std::shared_ptr<const Acts::Layer> Acts::CuboidVolumeBuilder::buildLayer(
-    const GeometryContext& gctx,
-    Acts::CuboidVolumeBuilder::LayerConfig& cfg) const {
+std::shared_ptr<const Layer> CuboidVolumeBuilder::buildLayer(
+    const GeometryContext& gctx, CuboidVolumeBuilder::LayerConfig& cfg) const {
   if (cfg.surfaces.empty() && cfg.surfaceCfg.empty()) {
     throw std::runtime_error{
         "Neither surfaces nor config to build surfaces was provided. Cannot "
@@ -94,14 +92,16 @@ std::shared_ptr<const Acts::Layer> Acts::CuboidVolumeBuilder::buildLayer(
   lCfg.surfaceArrayCreator = std::make_shared<const SurfaceArrayCreator>();
   LayerCreator layerCreator(lCfg);
   ProtoLayer pl{gctx, cfg.surfaces};
-  pl.envelope[binX] = cfg.envelopeX;
+  pl.envelope[AxisDirection::AxisX] = cfg.envelopeX;
+  pl.envelope[AxisDirection::AxisY] = cfg.envelopeY;
+  pl.envelope[AxisDirection::AxisZ] = cfg.envelopeZ;
   return layerCreator.planeLayer(gctx, cfg.surfaces, cfg.binsY, cfg.binsZ,
-                                 BinningValue::binX, pl, trafo);
+                                 cfg.binningDimension, pl, trafo);
 }
 
-std::pair<double, double> Acts::CuboidVolumeBuilder::binningRange(
+std::pair<double, double> CuboidVolumeBuilder::binningRange(
     const GeometryContext& gctx,
-    const Acts::CuboidVolumeBuilder::VolumeConfig& cfg) const {
+    const CuboidVolumeBuilder::VolumeConfig& cfg) const {
   using namespace UnitLiterals;
   // Construct return value
   std::pair<double, double> minMax = std::make_pair(
@@ -109,7 +109,7 @@ std::pair<double, double> Acts::CuboidVolumeBuilder::binningRange(
 
   // Compute the min volume boundaries for computing the binning start
   // See
-  // https://acts.readthedocs.io/en/latest/core/geometry.html#geometry-building
+  // https://acts.readthedocs.io/en/latest/core/geometry/legacy/building.html
   // !! IMPORTANT !! The volume is assumed to be already rotated into the
   // telescope geometry
   Vector3 minVolumeBoundaries = cfg.position - 0.5 * cfg.length;
@@ -120,10 +120,10 @@ std::pair<double, double> Acts::CuboidVolumeBuilder::binningRange(
   for (const auto& layercfg : cfg.layerCfg) {
     // recreating the protolayer for each layer => slow, but only few sensors
     ProtoLayer pl{gctx, layercfg.surfaces};
-    pl.envelope[binX] = layercfg.envelopeX;
+    pl.envelope[cfg.binningDimension] = layercfg.envelopeX;
 
-    double surfacePosMin = pl.min(binX);
-    double surfacePosMax = pl.max(binX);
+    double surfacePosMin = pl.min(cfg.binningDimension);
+    double surfacePosMax = pl.max(cfg.binningDimension);
 
     // Test if new extreme is found and set it
     if (surfacePosMin < minMax.first) {
@@ -135,42 +135,22 @@ std::pair<double, double> Acts::CuboidVolumeBuilder::binningRange(
   }
 
   // Use the volume boundaries as limits for the binning
-  minMax.first = std::min(minMax.first, minVolumeBoundaries(binX));
-  minMax.second = std::max(minMax.second, maxVolumeBoundaries(binX));
+  minMax.first = std::min(
+      minMax.first, minVolumeBoundaries(toUnderlying(cfg.binningDimension)));
+  minMax.second = std::max(
+      minMax.second, maxVolumeBoundaries(toUnderlying(cfg.binningDimension)));
 
   return minMax;
 }
 
-std::shared_ptr<Acts::TrackingVolume> Acts::CuboidVolumeBuilder::buildVolume(
-    const GeometryContext& gctx,
-    Acts::CuboidVolumeBuilder::VolumeConfig& cfg) const {
+std::shared_ptr<TrackingVolume> CuboidVolumeBuilder::buildVolume(
+    const GeometryContext& gctx, CuboidVolumeBuilder::VolumeConfig& cfg) const {
   // Build transformation
   Transform3 trafo(Transform3::Identity());
   trafo.translation() = cfg.position;
   // Set bounds
-  auto bounds = std::make_shared<const CuboidVolumeBounds>(
+  auto bounds = std::make_shared<CuboidVolumeBounds>(
       cfg.length.x() * 0.5, cfg.length.y() * 0.5, cfg.length.z() * 0.5);
-
-  if (cfg.layerCfg.empty()) {
-    // Build dummy layer if no layer is given (tmp solution)
-    SurfaceConfig sCfg;
-    sCfg.position = cfg.position;
-    // Rotation of the surfaces: +pi/2 around axis y
-    Vector3 xPos(0., 0., 1.);
-    Vector3 yPos(0., 1., 0.);
-    Vector3 zPos(-1., 0., 0.);
-    sCfg.rotation.col(0) = xPos;
-    sCfg.rotation.col(1) = yPos;
-    sCfg.rotation.col(2) = zPos;
-    // Bounds
-    sCfg.rBounds = std::make_shared<const RectangleBounds>(
-        RectangleBounds(cfg.length.y() * 0.5, cfg.length.z() * 0.5));
-
-    LayerConfig lCfg;
-    lCfg.surfaceCfg = {sCfg};
-
-    cfg.layerCfg.push_back(lCfg);
-  }
 
   // Gather the layers
   LayerVector layVec;
@@ -194,7 +174,7 @@ std::shared_ptr<Acts::TrackingVolume> Acts::CuboidVolumeBuilder::buildVolume(
       lacCnf, getDefaultLogger("LayerArrayCreator", Logging::INFO));
   std::unique_ptr<const LayerArray> layArr(
       layArrCreator.layerArray(gctx, layVec, minMax.first, minMax.second,
-                               BinningType::arbitrary, BinningValue::binX));
+                               BinningType::arbitrary, cfg.binningDimension));
 
   // Build confined volumes
   if (cfg.trackingVolumes.empty()) {
@@ -206,21 +186,21 @@ std::shared_ptr<Acts::TrackingVolume> Acts::CuboidVolumeBuilder::buildVolume(
   std::shared_ptr<TrackingVolume> trackVolume;
   if (layVec.empty()) {
     // Build TrackingVolume
-    trackVolume =
-        TrackingVolume::create(trafo, bounds, cfg.volumeMaterial, nullptr,
-                               nullptr, cfg.trackingVolumes, cfg.name);
+    trackVolume = std::make_shared<TrackingVolume>(
+        trafo, bounds, cfg.volumeMaterial, nullptr, nullptr,
+        cfg.trackingVolumes, cfg.name);
   } else {
     // Build TrackingVolume
-    trackVolume = TrackingVolume::create(trafo, bounds, cfg.volumeMaterial,
-                                         std::move(layArr), nullptr,
-                                         cfg.trackingVolumes, cfg.name);
+    trackVolume = std::make_shared<TrackingVolume>(
+        trafo, bounds, cfg.volumeMaterial, std::move(layArr), nullptr,
+        cfg.trackingVolumes, cfg.name);
   }
   return trackVolume;
 }
 
-Acts::MutableTrackingVolumePtr Acts::CuboidVolumeBuilder::trackingVolume(
-    const GeometryContext& gctx, Acts::TrackingVolumePtr /*unused*/,
-    Acts::VolumeBoundsPtr /*unused*/) const {
+MutableTrackingVolumePtr CuboidVolumeBuilder::trackingVolume(
+    const GeometryContext& gctx, TrackingVolumePtr /*gctx*/,
+    std::shared_ptr<const VolumeBounds> /*bounds*/) const {
   // Build volumes
   std::vector<std::shared_ptr<TrackingVolume>> volumes;
   volumes.reserve(m_cfg.volumeCfg.size());
@@ -230,10 +210,7 @@ Acts::MutableTrackingVolumePtr Acts::CuboidVolumeBuilder::trackingVolume(
 
   // Sort the volumes vectors according to the center location, otherwise the
   // binning boundaries will fail
-  std::sort(volumes.begin(), volumes.end(),
-            [](const TrackingVolumePtr& lhs, const TrackingVolumePtr& rhs) {
-              return lhs->center().x() < rhs->center().x();
-            });
+  std::ranges::sort(volumes, {}, [](const auto& v) { return v->center().x(); });
 
   // Glue volumes
   for (unsigned int i = 0; i < volumes.size() - 1; i++) {
@@ -250,7 +227,7 @@ Acts::MutableTrackingVolumePtr Acts::CuboidVolumeBuilder::trackingVolume(
   trafo.translation() = m_cfg.position;
 
   // Size of the volume
-  auto volume = std::make_shared<const CuboidVolumeBounds>(
+  auto volumeBounds = std::make_shared<CuboidVolumeBounds>(
       m_cfg.length.x() * 0.5, m_cfg.length.y() * 0.5, m_cfg.length.z() * 0.5);
 
   // Build vector of confined volumes
@@ -264,13 +241,13 @@ Acts::MutableTrackingVolumePtr Acts::CuboidVolumeBuilder::trackingVolume(
   std::vector<float> binBoundaries;
   binBoundaries.push_back(volumes[0]->center().x() -
                           m_cfg.volumeCfg[0].length.x() * 0.5);
-  for (size_t i = 0; i < volumes.size(); i++) {
+  for (std::size_t i = 0; i < volumes.size(); i++) {
     binBoundaries.push_back(volumes[i]->center().x() +
                             m_cfg.volumeCfg[i].length.x() * 0.5);
   }
 
   // Build binning
-  BinningData binData(BinningOption::open, BinningValue::binX, binBoundaries);
+  BinningData binData(BinningOption::open, AxisDirection::AxisX, binBoundaries);
   auto bu = std::make_unique<const BinUtility>(binData);
 
   // Build TrackingVolume array
@@ -278,8 +255,11 @@ Acts::MutableTrackingVolumePtr Acts::CuboidVolumeBuilder::trackingVolume(
       new BinnedArrayXD<TrackingVolumePtr>(tapVec, std::move(bu)));
 
   // Create world volume
-  MutableTrackingVolumePtr mtvp(
-      TrackingVolume::create(trafo, volume, trVolArr, "World"));
+  MutableTrackingVolumePtr mtvp(std::make_shared<TrackingVolume>(
+      trafo, volumeBounds, nullptr, nullptr, trVolArr,
+      MutableTrackingVolumeVector{}, "World"));
 
   return mtvp;
 }
+
+}  // namespace Acts

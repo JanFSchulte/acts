@@ -1,35 +1,45 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Geometry/DiscLayer.hpp"
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/Geometry/AbstractVolume.hpp"
 #include "Acts/Geometry/BoundarySurfaceFace.hpp"
-#include "Acts/Geometry/BoundarySurfaceT.hpp"
 #include "Acts/Geometry/CylinderVolumeBounds.hpp"
 #include "Acts/Geometry/GenericApproachDescriptor.hpp"
 #include "Acts/Geometry/Layer.hpp"
+#include "Acts/Geometry/Volume.hpp"
 #include "Acts/Surfaces/RadialBounds.hpp"
 #include "Acts/Surfaces/Surface.hpp"
-#include "Acts/Utilities/Helpers.hpp"
+#include "Acts/Surfaces/SurfaceArray.hpp"
 
 #include <vector>
 
-using Acts::VectorHelpers::perp;
-using Acts::VectorHelpers::phi;
+namespace Acts {
 
-Acts::DiscLayer::DiscLayer(const Transform3& transform,
-                           const std::shared_ptr<const DiscBounds>& dbounds,
-                           std::unique_ptr<SurfaceArray> surfaceArray,
-                           double thickness,
-                           std::unique_ptr<ApproachDescriptor> ades,
-                           LayerType laytyp)
+using VectorHelpers::perp;
+using VectorHelpers::phi;
+
+std::shared_ptr<DiscLayer> DiscLayer::create(
+    const Transform3& transform,
+    const std::shared_ptr<const DiscBounds>& dbounds,
+    std::unique_ptr<SurfaceArray> surfaceArray, double thickness,
+    std::unique_ptr<ApproachDescriptor> ad, LayerType laytyp) {
+  return std::shared_ptr<DiscLayer>(
+      new DiscLayer(transform, dbounds, std::move(surfaceArray), thickness,
+                    std::move(ad), laytyp));
+}
+
+DiscLayer::DiscLayer(const Transform3& transform,
+                     const std::shared_ptr<const DiscBounds>& dbounds,
+                     std::unique_ptr<SurfaceArray> surfaceArray,
+                     double thickness, std::unique_ptr<ApproachDescriptor> ades,
+                     LayerType laytyp)
     : DiscSurface(transform, dbounds),
       Layer(std::move(surfaceArray), thickness, std::move(ades), laytyp) {
   // In case we have Radial bounds
@@ -38,10 +48,10 @@ Acts::DiscLayer::DiscLayer(const Transform3& transform,
   if (rBounds != nullptr) {
     // The volume bounds
     auto rVolumeBounds =
-        std::make_shared<const CylinderVolumeBounds>(*rBounds, thickness);
+        std::make_shared<CylinderVolumeBounds>(*rBounds, thickness);
     // @todo rotate around x for the avePhi if you have a sector
     m_representingVolume =
-        std::make_unique<AbstractVolume>(m_transform, rVolumeBounds);
+        std::make_unique<Volume>(*m_transform, rVolumeBounds);
   }
   // associate the layer to the layer surface itself
   DiscSurface::associateLayer(*this);
@@ -55,32 +65,29 @@ Acts::DiscLayer::DiscLayer(const Transform3& transform,
   }
 }
 
-const Acts::DiscSurface& Acts::DiscLayer::surfaceRepresentation() const {
+const DiscSurface& DiscLayer::surfaceRepresentation() const {
   return (*this);
 }
 
-Acts::DiscSurface& Acts::DiscLayer::surfaceRepresentation() {
+DiscSurface& DiscLayer::surfaceRepresentation() {
   return (*this);
 }
 
-void Acts::DiscLayer::buildApproachDescriptor() {
+void DiscLayer::buildApproachDescriptor() {
   // delete it
   m_approachDescriptor.reset(nullptr);
   // take the boundary surfaces of the representving volume if they exist
   if (m_representingVolume != nullptr) {
     // get the boundary surfaces
-    const std::vector<std::shared_ptr<const BoundarySurfaceT<AbstractVolume>>>&
-        bSurfaces = m_representingVolume->boundarySurfaces();
+    std::vector<OrientedSurface> bSurfaces =
+        m_representingVolume->volumeBounds().orientedSurfaces(
+            m_representingVolume->transform());
     // fill in the surfaces into the vector
     std::vector<std::shared_ptr<const Surface>> aSurfaces;
-    aSurfaces.push_back(
-        bSurfaces.at(negativeFaceXY)->surfaceRepresentation().getSharedPtr());
-    aSurfaces.push_back(
-        bSurfaces.at(positiveFaceXY)->surfaceRepresentation().getSharedPtr());
-    aSurfaces.push_back(
-        bSurfaces.at(tubeInnerCover)->surfaceRepresentation().getSharedPtr());
-    aSurfaces.push_back(
-        bSurfaces.at(tubeOuterCover)->surfaceRepresentation().getSharedPtr());
+    aSurfaces.push_back(bSurfaces.at(negativeFaceXY).surface);
+    aSurfaces.push_back(bSurfaces.at(positiveFaceXY).surface);
+    aSurfaces.push_back(bSurfaces.at(tubeInnerCover).surface);
+    aSurfaces.push_back(bSurfaces.at(tubeOuterCover).surface);
     // create an ApproachDescriptor with Boundary surfaces
     m_approachDescriptor =
         std::make_unique<const GenericApproachDescriptor>(std::move(aSurfaces));
@@ -94,3 +101,5 @@ void Acts::DiscLayer::buildApproachDescriptor() {
     }
   }
 }
+
+}  // namespace Acts

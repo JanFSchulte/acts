@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -22,9 +22,7 @@
 #include <sstream>
 #include <string>
 
-namespace Acts {
-
-namespace PrimitivesView3DTest {
+namespace Acts::PrimitivesView3DTest {
 
 // Test on a plane
 auto identity = Transform3::Identity();
@@ -34,15 +32,15 @@ auto plane = Surface::makeShared<PlaneSurface>(identity, rectangle);
 // Test context
 GeometryContext gctx = GeometryContext();
 
-/// Helper method to visualiza all types of surfaces
+/// Helper method to visualize all types of surfaces
 ///
-/// @param helper The visualziation helper
+/// @param helper The visualization helper
 ///
 /// @return an overall string including all written output
 static inline std::string run(IVisualization3D& helper) {
   std::stringstream ss;
 
-  ViewConfig lineView({0, 0, 255});
+  ViewConfig lineView{.color = {0, 0, 255}};
   lineView.lineThickness = 0.1;
 
   // Line visualization ------------------------------------------------
@@ -73,10 +71,10 @@ static inline std::string run(IVisualization3D& helper) {
   // Error visualization: local ---------------------------------------------
   Acts::GeometryView3D::drawSurface(helper, *plane, gctx);
 
-  ViewConfig errorVis({250, 0, 0});
+  ViewConfig errorVis{.color = {250, 0, 0}};
   errorVis.lineThickness = 0.025;
 
-  SymMatrix2 cov = SymMatrix2::Identity();
+  SquareMatrix2 cov = SquareMatrix2::Identity();
   double s0 = 0.75;
   double s1 = 1.99;
   double r01 = 0.78;
@@ -92,7 +90,7 @@ static inline std::string run(IVisualization3D& helper) {
 
   // Error visualization: angular ---------------------------------------------
   Acts::GeometryView3D::drawSurface(helper, *plane, gctx);
-  cov = SymMatrix2::Identity();
+  cov = SquareMatrix2::Identity();
   s0 = 0.08;
   s1 = 0.035;
   r01 = 0.3;
@@ -117,5 +115,4 @@ static inline std::string run(IVisualization3D& helper) {
   return ss.str();
 }
 
-}  // namespace PrimitivesView3DTest
-}  // namespace Acts
+}  // namespace Acts::PrimitivesView3DTest

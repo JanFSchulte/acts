@@ -1,13 +1,14 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
+#include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/Geometry/ConeVolumeBounds.hpp"
 #include "Acts/Geometry/CuboidVolumeBounds.hpp"
@@ -15,21 +16,28 @@
 #include "Acts/Geometry/CylinderVolumeBounds.hpp"
 #include "Acts/Geometry/GenericCuboidVolumeBounds.hpp"
 #include "Acts/Geometry/TrapezoidVolumeBounds.hpp"
-#include "Acts/Plugins/Json/ActsJson.hpp"
 #include "Acts/Plugins/Json/VolumeBoundsJsonConverter.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <fstream>
-#include <iostream>
+#include <memory>
+#include <numbers>
+#include <string>
+#include <vector>
+
+#include <nlohmann/json.hpp>
 
 using namespace Acts;
 
-BOOST_AUTO_TEST_SUITE(VolumeBoundsJsonConverter)
+BOOST_AUTO_TEST_SUITE(VolumeBoundsJsonConversion)
+
 BOOST_AUTO_TEST_CASE(Cuboid) {
   std::ofstream out("CuboidVolumeBounds.json");
 
   auto cuboidRef = std::make_shared<const CuboidVolumeBounds>(2., 4., 6.);
-  nlohmann::json cuboidOut;
-  to_json(cuboidOut, *cuboidRef);
+  nlohmann::json cuboidOut = VolumeBoundsJsonConverter::toJson(*cuboidRef);
   out << cuboidOut.dump(2);
   out.close();
 
@@ -41,17 +49,17 @@ BOOST_AUTO_TEST_CASE(Cuboid) {
   in >> cuboidIn;
   in.close();
 
-  auto cuboidTest = volumeBoundsFromJson<CuboidVolumeBounds>(cuboidIn);
+  auto cuboidTest =
+      VolumeBoundsJsonConverter::fromJson<CuboidVolumeBounds>(cuboidIn);
   BOOST_CHECK(cuboidRef->values() == cuboidTest->values());
 }
 
 BOOST_AUTO_TEST_CASE(Cylinder) {
   std::ofstream out("CylinderVolumeBounds.json");
 
-  auto cylinderRef =
-      std::make_shared<const CylinderVolumeBounds>(10., 20., 30., M_PI / 4, 0);
-  nlohmann::json cylinderOut;
-  to_json(cylinderOut, *cylinderRef);
+  auto cylinderRef = std::make_shared<const CylinderVolumeBounds>(
+      10., 20., 30., std::numbers::pi / 4., 0);
+  nlohmann::json cylinderOut = VolumeBoundsJsonConverter::toJson(*cylinderRef);
   out << cylinderOut.dump(2);
   out.close();
 
@@ -63,17 +71,17 @@ BOOST_AUTO_TEST_CASE(Cylinder) {
   in >> cylinderIn;
   in.close();
 
-  auto cylinderTest = volumeBoundsFromJson<CylinderVolumeBounds>(cylinderIn);
+  auto cylinderTest =
+      VolumeBoundsJsonConverter::fromJson<CylinderVolumeBounds>(cylinderIn);
   BOOST_CHECK(cylinderRef->values() == cylinderTest->values());
 }
 
 BOOST_AUTO_TEST_CASE(Cone) {
   std::ofstream out("ConeVolumeBounds.json");
 
-  auto coneRef = std::make_shared<const ConeVolumeBounds>(0., 0., 0.45, 0.050,
-                                                          0.050, 0., M_PI);
-  nlohmann::json coneOut;
-  to_json(coneOut, *coneRef);
+  auto coneRef = std::make_shared<const ConeVolumeBounds>(
+      0., 0., 0.45, 0.050, 0.050, 0., std::numbers::pi);
+  nlohmann::json coneOut = VolumeBoundsJsonConverter::toJson(*coneRef);
   out << coneOut.dump(2);
   out.close();
 
@@ -85,7 +93,7 @@ BOOST_AUTO_TEST_CASE(Cone) {
   in >> coneIn;
   in.close();
 
-  auto coneTest = volumeBoundsFromJson<ConeVolumeBounds>(coneIn);
+  auto coneTest = VolumeBoundsJsonConverter::fromJson<ConeVolumeBounds>(coneIn);
   BOOST_CHECK(coneRef->values() == coneTest->values());
 }
 
@@ -94,8 +102,8 @@ BOOST_AUTO_TEST_CASE(CutoutCylinder) {
 
   auto cutoutCylinderRef =
       std::make_shared<const CutoutCylinderVolumeBounds>(5, 10, 15, 30, 25);
-  nlohmann::json cutoutCylinderOut;
-  to_json(cutoutCylinderOut, *cutoutCylinderRef);
+  nlohmann::json cutoutCylinderOut =
+      VolumeBoundsJsonConverter::toJson(*cutoutCylinderRef);
   out << cutoutCylinderOut.dump(2);
   out.close();
 
@@ -108,7 +116,8 @@ BOOST_AUTO_TEST_CASE(CutoutCylinder) {
   in.close();
 
   auto cutoutCylinderTest =
-      volumeBoundsFromJson<CutoutCylinderVolumeBounds>(cutoutCylinderIn);
+      VolumeBoundsJsonConverter::fromJson<CutoutCylinderVolumeBounds>(
+          cutoutCylinderIn);
   BOOST_CHECK(cutoutCylinderRef->values() == cutoutCylinderTest->values());
 }
 
@@ -124,10 +133,10 @@ BOOST_AUTO_TEST_CASE(GenericCuboid) {
                {2, 1, 1},
                {0, 1, 1}}};
 
-  nlohmann::json genericCuboidOut;
   auto genericCuboidRef =
       std::make_shared<const GenericCuboidVolumeBounds>(vertices);
-  to_json(genericCuboidOut, *genericCuboidRef);
+  nlohmann::json genericCuboidOut =
+      VolumeBoundsJsonConverter::toJson(*genericCuboidRef);
   out << genericCuboidOut.dump(2);
   out.close();
 
@@ -139,7 +148,7 @@ BOOST_AUTO_TEST_CASE(GenericCuboid) {
   in >> genericCuboidIn;
   in.close();
 
-  auto genericCuboidTest = genericVolumeBoundsFromJson(genericCuboidIn);
+  auto genericCuboidTest = VolumeBoundsJsonConverter::fromJson(genericCuboidIn);
   BOOST_CHECK(genericCuboidRef->values() == genericCuboidTest->values());
 }
 
@@ -148,8 +157,8 @@ BOOST_AUTO_TEST_CASE(Trapezoid) {
 
   auto trapezoidRef =
       std::make_shared<const TrapezoidVolumeBounds>(2., 4., 6., 8.);
-  nlohmann::json trapezoidOut;
-  to_json(trapezoidOut, *trapezoidRef);
+  nlohmann::json trapezoidOut =
+      VolumeBoundsJsonConverter::toJson(*trapezoidRef);
   out << trapezoidOut.dump(2);
   out.close();
 
@@ -161,7 +170,8 @@ BOOST_AUTO_TEST_CASE(Trapezoid) {
   in >> trapezoidIn;
   in.close();
 
-  auto trapezoidTest = volumeBoundsFromJson<TrapezoidVolumeBounds>(trapezoidIn);
+  auto trapezoidTest =
+      VolumeBoundsJsonConverter::fromJson<TrapezoidVolumeBounds>(trapezoidIn);
   BOOST_CHECK(trapezoidRef->values() == trapezoidTest->values());
 }
 BOOST_AUTO_TEST_SUITE_END()

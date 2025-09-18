@@ -1,21 +1,23 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include "Acts/MagneticField/MagneticFieldProvider.hpp"
-#include "Acts/Plugins/Python/Utilities.hpp"
-#include "Acts/Propagator/StraightLineStepper.hpp"
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/TrackFinding/TrackSelector.hpp"
 #include "ActsExamples/Fatras/FatrasSimulation.hpp"
 #include "ActsExamples/Io/Json/JsonGeometryList.hpp"
-#include "ActsExamples/Printers/HitsPrinter.hpp"
 #include "ActsExamples/Printers/ParticlesPrinter.hpp"
 #include "ActsExamples/Printers/TrackParametersPrinter.hpp"
+#include "ActsExamples/Utilities/Range.hpp"
+#include "ActsExamples/Utilities/TrackSelectorAlgorithm.hpp"
+#include "ActsPython/Utilities/Helpers.hpp"
+#include "ActsPython/Utilities/Macros.hpp"
 
-#include <memory>
+#include <vector>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -25,17 +27,16 @@ namespace py = pybind11;
 using namespace ActsExamples;
 using namespace Acts;
 
-namespace Acts::Python {
+namespace ActsPython {
 
 void addExampleAlgorithms(Context& ctx) {
-  auto mex = ctx.get("examples");
+  auto [m, mex] = ctx.get("main", "examples");
 
   mex.def("readJsonGeometryList", ActsExamples::readJsonGeometryList);
 
   ACTS_PYTHON_DECLARE_ALGORITHM(
       ActsExamples::FatrasSimulation, mex, "FatrasSimulation", inputParticles,
-      outputParticlesInitial, outputParticlesFinal, outputSimHits,
-      imputParametrisationNuclearInteraction, randomNumbers, trackingGeometry,
+      outputParticles, outputSimHits, randomNumbers, trackingGeometry,
       magneticField, pMin, emScattering, emEnergyLossIonisation,
       emEnergyLossRadiation, emPhotonConversion, generateHitsOnSensitive,
       generateHitsOnMaterial, generateHitsOnPassive, averageHitsPerParticle);
@@ -43,13 +44,71 @@ void addExampleAlgorithms(Context& ctx) {
   ACTS_PYTHON_DECLARE_ALGORITHM(ActsExamples::ParticlesPrinter, mex,
                                 "ParticlesPrinter", inputParticles);
 
-  ACTS_PYTHON_DECLARE_ALGORITHM(
-      ActsExamples::HitsPrinter, mex, "HitsPrinter", inputClusters,
-      inputMeasurementParticlesMap, inputHitIds, selectIndexStart,
-      selectIndexLength, selectVolume, selectLayer, selectModule);
-
   ACTS_PYTHON_DECLARE_ALGORITHM(ActsExamples::TrackParametersPrinter, mex,
                                 "TrackParametersPrinter", inputTrackParameters);
-}
 
-}  // namespace Acts::Python
+  {
+    using Alg = ActsExamples::TrackSelectorAlgorithm;
+    using Config = Alg::Config;
+
+    auto alg = py::class_<Alg, IAlgorithm, std::shared_ptr<Alg>>(
+                   mex, "TrackSelectorAlgorithm")
+                   .def(py::init<const Alg::Config&, Logging::Level>(),
+                        py::arg("config"), py::arg("level"))
+                   .def_property_readonly("config", &Alg::config);
+
+    auto c = py::class_<Config>(alg, "Config").def(py::init<>());
+
+    ACTS_PYTHON_STRUCT(c, inputTracks, outputTracks, selectorConfig);
+  }
+
+  {
+    using EtaBinnedConfig = TrackSelector::EtaBinnedConfig;
+    using Config = TrackSelector::Config;
+
+    auto tool = py::class_<TrackSelector>(m, "TrackSelector")
+                    .def(py::init<const Config&>(), py::arg("config"))
+                    .def(py::init<const EtaBinnedConfig&>(), py::arg("config"));
+
+    {
+      auto mc = py::class_<TrackSelector::MeasurementCounter>(
+                    tool, "MeasurementCounter")
+                    .def(py::init<>())
+                    .def("addCounter",
+                         &TrackSelector::MeasurementCounter::addCounter);
+    }
+
+    {
+      auto c = py::class_<Config>(tool, "Config").def(py::init<>());
+
+      patchKwargsConstructor(c);
+
+      ACTS_PYTHON_STRUCT(c, loc0Min, loc0Max, loc1Min, loc1Max, timeMin,
+                         timeMax, phiMin, phiMax, etaMin, etaMax, absEtaMin,
+                         absEtaMax, ptMin, ptMax, minMeasurements, maxHoles,
+                         maxOutliers, maxHolesAndOutliers, maxSharedHits,
+                         maxChi2, measurementCounter, requireReferenceSurface);
+
+      pythonRangeProperty(c, "loc0", &Config::loc0Min, &Config::loc0Max);
+      pythonRangeProperty(c, "loc1", &Config::loc1Min, &Config::loc1Max);
+      pythonRangeProperty(c, "time", &Config::timeMin, &Config::timeMax);
+      pythonRangeProperty(c, "phi", &Config::phiMin, &Config::phiMax);
+      pythonRangeProperty(c, "eta", &Config::etaMin, &Config::etaMax);
+      pythonRangeProperty(c, "absEta", &Config::absEtaMin, &Config::absEtaMax);
+      pythonRangeProperty(c, "pt", &Config::ptMin, &Config::ptMax);
+    }
+
+    {
+      auto c = py::class_<EtaBinnedConfig>(tool, "EtaBinnedConfig")
+                   .def(py::init<>())
+                   .def(py::init<const Config&>());
+
+      patchKwargsConstructor(c);
+
+      c.def_property_readonly("nEtaBins", &EtaBinnedConfig::nEtaBins);
+
+      ACTS_PYTHON_STRUCT(c, cutSets, absEtaEdges);
+    }
+  }
+}
+}  // namespace ActsPython

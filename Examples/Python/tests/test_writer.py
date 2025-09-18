@@ -1,8 +1,9 @@
-from typing import Type
 import os
 import inspect
 from pathlib import Path
 import shutil
+import math
+import sys
 import tempfile
 
 import pytest
@@ -11,44 +12,51 @@ from helpers import (
     dd4hepEnabled,
     hepmc3Enabled,
     geant4Enabled,
-    edm4hepEnabled,
     AssertCollectionExistsAlg,
 )
 
 import acts
-
-from common import getOpenDataDetectorDirectory
-
-from acts import PlanarModuleStepper, UnitConstants as u
-
-
+from acts import UnitConstants as u
 from acts.examples import (
     ObjPropagationStepsWriter,
-    TrackFinderPerformanceWriter,
-    SeedingPerformanceWriter,
+    TrackFinderNTupleWriter,
     RootPropagationStepsWriter,
     RootParticleWriter,
     RootTrackParameterWriter,
     RootMaterialTrackWriter,
     RootMaterialWriter,
-    RootPlanarClusterWriter,
     RootSimHitWriter,
-    RootTrajectoryStatesWriter,
-    RootTrajectorySummaryWriter,
-    RootVertexPerformanceWriter,
+    RootTrackStatesWriter,
+    RootTrackSummaryWriter,
+    VertexNTupleWriter,
     RootMeasurementWriter,
     CsvParticleWriter,
-    CsvPlanarClusterWriter,
     CsvSimHitWriter,
-    CsvMultiTrajectoryWriter,
+    CsvTrackParameterWriter,
+    CsvTrackWriter,
     CsvTrackingGeometryWriter,
     CsvMeasurementWriter,
-    PlanarSteppingAlgorithm,
     JsonMaterialWriter,
     JsonFormat,
     Sequencer,
     GenericDetector,
 )
+from acts.examples.odd import getOpenDataDetectorDirectory
+
+
+def assert_csv_output(csv_path, stem, num_files, size_threshold=100):
+    __tracebackhide__ = True
+    assert (
+        len([f for f in csv_path.iterdir() if f.name.endswith(stem + ".csv")])
+        == num_files
+    )
+    assert all(
+        [
+            f.stat().st_size > size_threshold
+            for f in csv_path.iterdir()
+            if f.name.endswith(stem + ".csv")
+        ]
+    )
 
 
 @pytest.mark.obj
@@ -63,7 +71,7 @@ def test_obj_propagation_step_writer(tmp_path, trk_geo, conf_const, basic_prop_s
     w = conf_const(
         ObjPropagationStepsWriter,
         acts.logging.INFO,
-        collection=alg.config.propagationStepCollection,
+        collection=alg.config.outputSummaryCollection,
         outputDir=str(obj),
     )
 
@@ -79,7 +87,7 @@ def test_obj_propagation_step_writer(tmp_path, trk_geo, conf_const, basic_prop_s
 @pytest.mark.csv
 def test_csv_particle_writer(tmp_path, conf_const, ptcl_gun):
     s = Sequencer(numThreads=1, events=10)
-    evGen = ptcl_gun(s)
+    _, h3conv = ptcl_gun(s)
 
     out = tmp_path / "csv"
 
@@ -89,7 +97,7 @@ def test_csv_particle_writer(tmp_path, conf_const, ptcl_gun):
         conf_const(
             CsvParticleWriter,
             acts.logging.INFO,
-            inputParticles=evGen.config.outputParticles,
+            inputParticles=h3conv.config.outputParticles,
             outputStem="particle",
             outputDir=str(out),
         )
@@ -97,8 +105,7 @@ def test_csv_particle_writer(tmp_path, conf_const, ptcl_gun):
 
     s.run()
 
-    assert len([f for f in out.iterdir() if f.is_file()]) == s.config.events
-    assert all(f.stat().st_size > 200 for f in out.iterdir())
+    assert_csv_output(out, "particle", s.config.events, size_threshold=200)
 
 
 @pytest.mark.root
@@ -115,7 +122,7 @@ def test_root_prop_step_writer(
     w = conf_const(
         RootPropagationStepsWriter,
         acts.logging.INFO,
-        collection=alg.config.propagationStepCollection,
+        collection=alg.config.outputSummaryCollection,
         filePath=str(file),
     )
 
@@ -131,7 +138,7 @@ def test_root_prop_step_writer(
 @pytest.mark.root
 def test_root_particle_writer(tmp_path, conf_const, ptcl_gun, assert_root_hash):
     s = Sequencer(numThreads=1, events=10)
-    evGen = ptcl_gun(s)
+    _, h3conv = ptcl_gun(s)
 
     file = tmp_path / "particles.root"
 
@@ -141,7 +148,7 @@ def test_root_particle_writer(tmp_path, conf_const, ptcl_gun, assert_root_hash):
         conf_const(
             RootParticleWriter,
             acts.logging.INFO,
-            inputParticles=evGen.config.outputParticles,
+            inputParticles=h3conv.config.outputParticles,
             filePath=str(file),
         )
     )
@@ -168,9 +175,8 @@ def test_root_meas_writer(tmp_path, fatras, trk_geo, assert_root_hash):
         inputSimHits=simAlg.config.outputSimHits,
         inputMeasurementSimHitsMap=digiAlg.config.outputMeasurementSimHitsMap,
         filePath=str(out),
-        trackingGeometry=trk_geo,
+        surfaceByIdentifier=trk_geo.geoIdSurfaceMap(),
     )
-    config.addBoundIndicesFromDigiConfig(digiAlg.config)
     s.addWriter(RootMeasurementWriter(level=acts.logging.INFO, config=config))
     s.run()
 
@@ -204,48 +210,41 @@ def test_root_simhits_writer(tmp_path, fatras, conf_const, assert_root_hash):
 
 
 @pytest.mark.root
-def test_root_clusters_writer(
-    tmp_path, fatras, conf_const, trk_geo, rng, assert_root_hash
-):
-    s = Sequencer(numThreads=1, events=10)  # we're not going to use this one
-    evGen, simAlg, _ = fatras(s)
+def test_root_tracksummary_writer(tmp_path, fatras, conf_const):
+    detector = GenericDetector()
+    trackingGeometry = detector.trackingGeometry()
+    field = acts.ConstantBField(acts.Vector3(0, 0, 2 * u.T))
     s = Sequencer(numThreads=1, events=10)
-    s.addReader(evGen)
-    s.addAlgorithm(simAlg)
-    digiAlg = PlanarSteppingAlgorithm(
-        level=acts.logging.INFO,
-        inputSimHits=simAlg.config.outputSimHits,
-        outputClusters="clusters",
-        outputSourceLinks="sourcelinks",
-        outputDigiSourceLinks="digi_sourcelinks",
-        outputMeasurements="measurements",
-        outputMeasurementParticlesMap="meas_ptcl_map",
-        outputMeasurementSimHitsMap="meas_sh_map",
-        trackingGeometry=trk_geo,
-        randomNumbers=rng,
-        planarModuleStepper=PlanarModuleStepper(),
+
+    from truth_tracking_kalman import runTruthTrackingKalman
+
+    # This also runs the RootTrackSummaryWriter with truth information
+    runTruthTrackingKalman(
+        trackingGeometry,
+        field,
+        digiConfigFile=Path(
+            str(
+                Path(__file__).parent.parent.parent.parent
+                / "Examples/Configs/generic-digi-smearing-config.json"
+            )
+        ),
+        outputDir=tmp_path,
+        s=s,
     )
-    s.addAlgorithm(digiAlg)
 
-    out = tmp_path / "clusters.root"
-
-    assert not out.exists()
-
+    # Run the RootTrackSummaryWriter without the truth information
     s.addWriter(
         conf_const(
-            RootPlanarClusterWriter,
+            RootTrackSummaryWriter,
             level=acts.logging.INFO,
-            filePath=str(out),
-            inputSimHits=simAlg.config.outputSimHits,
-            inputClusters=digiAlg.config.outputClusters,
-            trackingGeometry=trk_geo,
+            inputTracks="tracks",
+            filePath=str(tmp_path / "track_summary_kf_no_truth.root"),
         )
     )
 
     s.run()
-    assert out.exists()
-    assert out.stat().st_size > 2**10 * 50
-    assert_root_hash(out.name, out)
+    assert (tmp_path / "tracksummary_kf.root").exists()
+    assert (tmp_path / "track_summary_kf_no_truth.root").exists()
 
 
 @pytest.mark.csv
@@ -262,15 +261,15 @@ def test_csv_meas_writer(tmp_path, fatras, trk_geo, conf_const):
             level=acts.logging.INFO,
             inputMeasurements=digiAlg.config.outputMeasurements,
             inputClusters=digiAlg.config.outputClusters,
-            inputSimHits=simAlg.config.outputSimHits,
             inputMeasurementSimHitsMap=digiAlg.config.outputMeasurementSimHitsMap,
             outputDir=str(out),
         )
     )
     s.run()
 
-    assert len([f for f in out.iterdir() if f.is_file()]) == s.config.events * 3
-    assert all(f.stat().st_size > 10 for f in out.iterdir())
+    assert_csv_output(out, "measurements", s.config.events, size_threshold=10)
+    assert_csv_output(out, "measurement-simhit-map", s.config.events, size_threshold=10)
+    assert_csv_output(out, "cells", s.config.events, size_threshold=10)
 
 
 @pytest.mark.csv
@@ -292,49 +291,7 @@ def test_csv_simhits_writer(tmp_path, fatras, conf_const):
     )
 
     s.run()
-    assert len([f for f in out.iterdir() if f.is_file()]) == s.config.events
-    assert all(f.stat().st_size > 200 for f in out.iterdir())
-
-
-@pytest.mark.csv
-def test_csv_clusters_writer(tmp_path, fatras, conf_const, trk_geo, rng):
-    s = Sequencer(numThreads=1, events=10)  # we're not going to use this one
-    evGen, simAlg, _ = fatras(s)
-    s = Sequencer(numThreads=1, events=10)
-    s.addReader(evGen)
-    s.addAlgorithm(simAlg)
-    digiAlg = PlanarSteppingAlgorithm(
-        level=acts.logging.WARNING,
-        inputSimHits=simAlg.config.outputSimHits,
-        outputClusters="clusters",
-        outputSourceLinks="sourcelinks",
-        outputDigiSourceLinks="digi_sourcelinks",
-        outputMeasurements="measurements",
-        outputMeasurementParticlesMap="meas_ptcl_map",
-        outputMeasurementSimHitsMap="meas_sh_map",
-        trackingGeometry=trk_geo,
-        randomNumbers=rng,
-        planarModuleStepper=PlanarModuleStepper(),
-    )
-    s.addAlgorithm(digiAlg)
-
-    out = tmp_path / "csv"
-    out.mkdir()
-
-    s.addWriter(
-        conf_const(
-            CsvPlanarClusterWriter,
-            level=acts.logging.WARNING,
-            outputDir=str(out),
-            inputSimHits=simAlg.config.outputSimHits,
-            inputClusters=digiAlg.config.outputClusters,
-            trackingGeometry=trk_geo,
-        )
-    )
-
-    s.run()
-    assert len([f for f in out.iterdir() if f.is_file()]) == s.config.events * 3
-    assert all(f.stat().st_size > 1024 for f in out.iterdir())
+    assert_csv_output(out, "hits", s.config.events, size_threshold=200)
 
 
 @pytest.mark.parametrize(
@@ -342,18 +299,15 @@ def test_csv_clusters_writer(tmp_path, fatras, conf_const, trk_geo, rng):
     [
         RootPropagationStepsWriter,
         RootParticleWriter,
-        TrackFinderPerformanceWriter,
-        SeedingPerformanceWriter,
+        TrackFinderNTupleWriter,
         RootTrackParameterWriter,
         RootMaterialTrackWriter,
         RootMeasurementWriter,
         RootMaterialWriter,
-        RootPlanarClusterWriter,
         RootSimHitWriter,
-        RootTrajectoryStatesWriter,
-        RootTrajectorySummaryWriter,
-        RootVertexPerformanceWriter,
-        SeedingPerformanceWriter,
+        RootTrackStatesWriter,
+        RootTrackSummaryWriter,
+        VertexNTupleWriter,
     ],
 )
 @pytest.mark.root
@@ -373,8 +327,8 @@ def test_root_writer_interface(writer, conf_const, tmp_path, trk_geo):
     for k, _ in inspect.getmembers(config):
         if k.startswith("input"):
             kw[k] = "collection"
-        if k == "trackingGeometry":
-            kw[k] = trk_geo
+        if k == "surfaceByIdentifier":
+            kw[k] = trk_geo.geoIdSurfaceMap()
 
     assert conf_const(writer, **kw)
 
@@ -386,9 +340,8 @@ def test_root_writer_interface(writer, conf_const, tmp_path, trk_geo):
     [
         CsvParticleWriter,
         CsvMeasurementWriter,
-        CsvPlanarClusterWriter,
         CsvSimHitWriter,
-        CsvMultiTrajectoryWriter,
+        CsvTrackWriter,
         CsvTrackingGeometryWriter,
     ],
 )
@@ -414,36 +367,38 @@ def test_csv_writer_interface(writer, conf_const, tmp_path, trk_geo):
 
 
 @pytest.mark.root
+@pytest.mark.odd
 @pytest.mark.skipif(not dd4hepEnabled, reason="DD4hep not set up")
 def test_root_material_writer(tmp_path, assert_root_hash):
-    from acts.examples.dd4hep import DD4hepDetector
+    from acts.examples.odd import getOpenDataDetector
 
-    detector, trackingGeometry, _ = DD4hepDetector.create(
-        xmlFileNames=[str(getOpenDataDetectorDirectory() / "xml/OpenDataDetector.xml")]
-    )
+    with getOpenDataDetector() as detector:
+        trackingGeometry = detector.trackingGeometry()
 
-    out = tmp_path / "material.root"
+        out = tmp_path / "material.root"
 
-    assert not out.exists()
+        assert not out.exists()
 
-    rmw = RootMaterialWriter(level=acts.logging.WARNING, filePath=str(out))
-    assert out.exists()
-    assert out.stat().st_size > 0 and out.stat().st_size < 500
-    rmw.write(trackingGeometry)
+        rmw = RootMaterialWriter(level=acts.logging.WARNING, filePath=str(out))
+        assert out.exists()
+        assert out.stat().st_size > 0 and out.stat().st_size < 500
+        rmw.write(trackingGeometry)
 
-    assert out.stat().st_size > 1000
-    assert_root_hash(out.name, out)
+        assert out.stat().st_size > 1000
+        assert_root_hash(out.name, out)
 
 
 @pytest.mark.json
+@pytest.mark.odd
 @pytest.mark.parametrize("fmt", [JsonFormat.Json, JsonFormat.Cbor])
 @pytest.mark.skipif(not dd4hepEnabled, reason="DD4hep not set up")
 def test_json_material_writer(tmp_path, fmt):
     from acts.examples.dd4hep import DD4hepDetector
 
-    detector, trackingGeometry, _ = DD4hepDetector.create(
+    detector = DD4hepDetector(
         xmlFileNames=[str(getOpenDataDetectorDirectory() / "xml/OpenDataDetector.xml")]
     )
+    trackingGeometry = detector.trackingGeometry()
 
     out = (tmp_path / "material").with_suffix("." + fmt.name.lower())
 
@@ -460,7 +415,8 @@ def test_json_material_writer(tmp_path, fmt):
 
 @pytest.mark.csv
 def test_csv_multitrajectory_writer(tmp_path):
-    detector, trackingGeometry, decorators = GenericDetector.create()
+    detector = GenericDetector()
+    trackingGeometry = detector.trackingGeometry()
     field = acts.ConstantBField(acts.Vector3(0, 0, 2 * u.T))
 
     from truth_tracking_kalman import runTruthTrackingKalman
@@ -472,7 +428,7 @@ def test_csv_multitrajectory_writer(tmp_path):
         digiConfigFile=Path(
             str(
                 Path(__file__).parent.parent.parent.parent
-                / "Examples/Algorithms/Digitization/share/default-smearing-config-generic.json"
+                / "Examples/Configs/generic-digi-smearing-config.json"
             )
         ),
         outputDir=tmp_path,
@@ -482,185 +438,21 @@ def test_csv_multitrajectory_writer(tmp_path):
     csv_dir = tmp_path / "csv"
     csv_dir.mkdir()
     s.addWriter(
-        CsvMultiTrajectoryWriter(
+        CsvTrackWriter(
             level=acts.logging.INFO,
-            inputTrajectories="trajectories",
+            inputTracks="tracks",
             inputMeasurementParticlesMap="measurement_particles_map",
             outputDir=str(csv_dir),
         )
     )
     s.run()
-    del s
-    assert len([f for f in csv_dir.iterdir() if f.is_file()]) == 10
-    assert all(f.stat().st_size > 20 for f in csv_dir.iterdir())
+    assert_csv_output(csv_dir, "CKFtracks", s.config.events, size_threshold=20)
 
 
-@pytest.fixture(scope="session")
-def hepmc_data_impl(tmp_path_factory):
-    import subprocess
-
-    script = (
-        Path(__file__).parent.parent.parent.parent
-        / "Examples"
-        / "Scripts"
-        / "Python"
-        / "event_recording.py"
-    )
-    assert script.exists()
-
-    with tempfile.TemporaryDirectory() as tmp_path:
-        env = os.environ.copy()
-        env["NEVENTS"] = "1"
-        subprocess.check_call([str(script)], cwd=tmp_path, env=env)
-
-        outfile = Path(tmp_path) / "hepmc3/event000000000-events.hepmc3"
-        # fake = Path("/scratch/pagessin/acts/hepmc3/event000000000-events.hepmc3")
-
-        # outfile.parent.mkdir()
-        # shutil.copy(fake, outfile)
-
-        assert outfile.exists()
-
-        yield outfile
-
-
-@pytest.fixture
-def hepmc_data(hepmc_data_impl: Path, tmp_path):
-    dest = tmp_path / hepmc_data_impl.name
-    shutil.copy(hepmc_data_impl, dest)
-
-    return dest
-
-
-@pytest.mark.skipif(not hepmc3Enabled, reason="HepMC3 plugin not available")
-@pytest.mark.skipif(not dd4hepEnabled, reason="DD4hep not set up")
-@pytest.mark.skipif(not geant4Enabled, reason="Geant4 not set up")
-@pytest.mark.slow
-def test_hepmc3_histogram(hepmc_data, tmp_path):
-    from acts.examples.hepmc3 import (
-        HepMC3AsciiReader,
-        HepMCProcessExtractor,
-    )
-
-    s = Sequencer(numThreads=1)
-
-    s.addReader(
-        HepMC3AsciiReader(
-            level=acts.logging.INFO,
-            inputDir=str(hepmc_data.parent),
-            inputStem="events",
-            outputEvents="hepmc-events",
-        )
-    )
-
-    s.addAlgorithm(
-        HepMCProcessExtractor(
-            level=acts.logging.INFO,
-            inputEvents="hepmc-events",
-            extractionProcess="Inelastic",
-        )
-    )
-
-    # This segfaults, see https://github.com/acts-project/acts/issues/914
-    # s.addWriter(
-    #     RootNuclearInteractionParametersWriter(
-    #         level=acts.logging.INFO, inputSimulationProcesses="event-fraction"
-    #     )
-    # )
-
-    alg = AssertCollectionExistsAlg(
-        "hepmc-events", name="check_alg", level=acts.logging.INFO
-    )
-    s.addAlgorithm(alg)
-
-    s.run()
-
-
-@pytest.mark.edm4hep
-@pytest.mark.skipif(not edm4hepEnabled, reason="EDM4hep is not set up")
-def test_edm4hep_measurement_writer(tmp_path, fatras):
-    from acts.examples.edm4hep import EDM4hepMeasurementWriter
-
-    s = Sequencer(numThreads=1, events=10)
-    _, simAlg, digiAlg = fatras(s)
-
-    out = tmp_path / "measurements_edm4hep.root"
-
-    s.addWriter(
-        EDM4hepMeasurementWriter(
-            level=acts.logging.VERBOSE,
-            inputMeasurements=digiAlg.config.outputMeasurements,
-            inputClusters=digiAlg.config.outputClusters,
-            inputSimHits=simAlg.config.outputSimHits,
-            inputMeasurementSimHitsMap=digiAlg.config.outputMeasurementSimHitsMap,
-            outputPath=str(out),
-        )
-    )
-
-    s.run()
-
-    assert os.path.isfile(out)
-    assert os.stat(out).st_size > 10
-
-
-@pytest.mark.edm4hep
-@pytest.mark.skipif(not edm4hepEnabled, reason="EDM4hep is not set up")
-def test_edm4hep_simhit_writer(tmp_path, fatras, conf_const):
-    from acts.examples.edm4hep import EDM4hepSimHitWriter
-
-    s = Sequencer(numThreads=1, events=10)
-    _, simAlg, _ = fatras(s)
-
-    out = tmp_path / "simhits_edm4hep.root"
-
-    s.addWriter(
-        conf_const(
-            EDM4hepSimHitWriter,
-            level=acts.logging.INFO,
-            inputSimHits=simAlg.config.outputSimHits,
-            outputPath=str(out),
-        )
-    )
-
-    s.run()
-
-    assert os.path.isfile(out)
-    assert os.stat(out).st_size > 200
-
-
-@pytest.mark.edm4hep
-@pytest.mark.skipif(not edm4hepEnabled, reason="EDM4hep is not set up")
-def test_edm4hep_particle_writer(tmp_path, conf_const, ptcl_gun):
-    from acts.examples.edm4hep import EDM4hepParticleWriter
-
-    s = Sequencer(numThreads=1, events=10)
-    evGen = ptcl_gun(s)
-
-    out = tmp_path / "particles_edm4hep.root"
-
-    out.mkdir()
-
-    s.addWriter(
-        conf_const(
-            EDM4hepParticleWriter,
-            acts.logging.INFO,
-            inputParticles=evGen.config.outputParticles,
-            outputPath=str(out),
-        )
-    )
-
-    s.run()
-
-    assert os.path.isfile(out)
-    assert os.stat(out).st_size > 200
-
-
-@pytest.mark.edm4hep
-@pytest.mark.skipif(not edm4hepEnabled, reason="EDM4hep is not set up")
-def test_edm4hep_multitrajectory_writer(tmp_path):
-    from acts.examples.edm4hep import EDM4hepMultiTrajectoryWriter
-
-    detector, trackingGeometry, decorators = GenericDetector.create()
+@pytest.mark.csv
+def test_csv_trackparameter_writer(tmp_path):
+    detector = GenericDetector()
+    trackingGeometry = detector.trackingGeometry()
     field = acts.ConstantBField(acts.Vector3(0, 0, 2 * u.T))
 
     from truth_tracking_kalman import runTruthTrackingKalman
@@ -672,25 +464,22 @@ def test_edm4hep_multitrajectory_writer(tmp_path):
         digiConfigFile=Path(
             str(
                 Path(__file__).parent.parent.parent.parent
-                / "Examples/Algorithms/Digitization/share/default-smearing-config-generic.json"
+                / "Examples/Configs/generic-digi-smearing-config.json"
             )
         ),
         outputDir=tmp_path,
         s=s,
     )
 
-    out = tmp_path / "trajectories_edm4hep.root"
-
+    csv_dir = tmp_path / "csv"
+    csv_dir.mkdir()
     s.addWriter(
-        EDM4hepMultiTrajectoryWriter(
-            level=acts.logging.VERBOSE,
-            inputTrajectories="trajectories",
-            inputMeasurementParticlesMap="measurement_particles_map",
-            outputPath=str(out),
+        CsvTrackParameterWriter(
+            level=acts.logging.INFO,
+            inputTracks="tracks",
+            outputStem="track_parameters",
+            outputDir=str(csv_dir),
         )
     )
-
     s.run()
-
-    assert os.path.isfile(out)
-    assert os.stat(out).st_size > 200
+    assert_csv_output(csv_dir, "track_parameters", s.config.events, size_threshold=20)

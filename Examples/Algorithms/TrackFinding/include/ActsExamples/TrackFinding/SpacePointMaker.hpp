@@ -1,18 +1,21 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Geometry/GeometryIdentifier.hpp"
 #include "Acts/SpacePointFormation/SpacePointBuilder.hpp"
-#include "ActsExamples/EventData/IndexSourceLink.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "ActsExamples/EventData/Measurement.hpp"
 #include "ActsExamples/EventData/SimSpacePoint.hpp"
-#include "ActsExamples/Framework/BareAlgorithm.hpp"
+#include "ActsExamples/Framework/DataHandle.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
+#include "ActsExamples/Framework/ProcessCode.hpp"
 
 #include <memory>
 #include <string>
@@ -23,6 +26,7 @@ class TrackingGeometry;
 }
 
 namespace ActsExamples {
+struct AlgorithmContext;
 
 /// Create space point representations from measurements.
 ///
@@ -38,11 +42,9 @@ namespace ActsExamples {
 /// There are no explicit requirements on the content of the input measurements.
 /// If no local positions are measured, the transformed global positions will
 /// always be the position of the module origin.
-class SpacePointMaker final : public BareAlgorithm {
+class SpacePointMaker final : public IAlgorithm {
  public:
   struct Config {
-    /// Input source links collection.
-    std::string inputSourceLinks;
     /// Input measurements collection.
     std::string inputMeasurements;
     /// Output space points collection.
@@ -57,6 +59,8 @@ class SpacePointMaker final : public BareAlgorithm {
     /// with all components set to zero selects all available measurements. The
     /// selection must not have duplicates.
     std::vector<Acts::GeometryIdentifier> geometrySelection;
+
+    std::vector<Acts::GeometryIdentifier> stripGeometrySelection;
   };
 
   /// Construct the space point maker.
@@ -71,12 +75,27 @@ class SpacePointMaker final : public BareAlgorithm {
   /// @return a process code indication success or failure
   ProcessCode execute(const AlgorithmContext& ctx) const override;
 
+  ProcessCode initialize() override;
+
   /// Const access to the config
   const Config& config() const { return m_cfg; }
 
  private:
+  void initializeStripPartners();
+
   Config m_cfg;
 
+  std::unordered_map<Acts::GeometryIdentifier, Acts::GeometryIdentifier>
+      m_stripPartner;
+
+  std::optional<IndexSourceLink::SurfaceAccessor> m_slSurfaceAccessor;
+
   Acts::SpacePointBuilder<SimSpacePoint> m_spacePointBuilder;
+
+  ReadDataHandle<MeasurementContainer> m_inputMeasurements{this,
+                                                           "InputMeasurements"};
+
+  WriteDataHandle<SimSpacePointContainer> m_outputSpacePoints{
+      this, "OutputSpacePoints"};
 };
 }  // namespace ActsExamples

@@ -1,23 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Utilities/AxisDefinitions.hpp"
 #include "Acts/Utilities/BinUtility.hpp"
-#include "Acts/Utilities/BinningData.hpp"
 #include "Acts/Utilities/BinningType.hpp"
+#include "Acts/Utilities/ProtoAxis.hpp"
 
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <numbers>
+#include <utility>
+#include <vector>
 
-namespace Acts {
-namespace Test {
-
-namespace tt = boost::test_tools;
+namespace Acts::Test {
 
 // OPEN - equidistant binning tests
 BOOST_AUTO_TEST_CASE(BinUtility_equidistant_binning) {
@@ -25,12 +29,12 @@ BOOST_AUTO_TEST_CASE(BinUtility_equidistant_binning) {
   Vector3 edgePosition(0.5, 0.5, 0.5);
 
   // | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
-  BinUtility xUtil_eq(10, 0., 10., open, binX);
-  BinUtility yUtil_eq(10, 0., 10., open, binY);
-  BinUtility zUtil_eq(10, 0., 10., open, binZ);
-  BOOST_CHECK_EQUAL(xUtil_eq.bins(), (size_t)10);
+  BinUtility xUtil_eq(10, 0., 10., open, AxisDirection::AxisX);
+  BinUtility yUtil_eq(10, 0., 10., open, AxisDirection::AxisY);
+  BinUtility zUtil_eq(10, 0., 10., open, AxisDirection::AxisZ);
+  BOOST_CHECK_EQUAL(xUtil_eq.bins(), std::size_t{10});
   // make it 2-dim
-  BinUtility xyUtil_eq(10, 0., 10., open, binX);
+  BinUtility xyUtil_eq(10, 0., 10., open, AxisDirection::AxisX);
   xyUtil_eq += yUtil_eq;
   BOOST_CHECK_EQUAL(xyUtil_eq.bins(), 100u);
   // make it 3-dim
@@ -43,7 +47,7 @@ BOOST_AUTO_TEST_CASE(BinUtility_equidistant_binning) {
   BOOST_CHECK_EQUAL(xyzUtil_eq.dimensions(), 3u);
 
   // check equality operator
-  BinUtility xUtil_eq_copy(10, 0., 10., open, binX);
+  BinUtility xUtil_eq_copy(10, 0., 10., open, AxisDirection::AxisX);
   BOOST_CHECK_EQUAL(xUtil_eq_copy, xUtil_eq);
   BOOST_CHECK_NE(yUtil_eq, xUtil_eq);
 
@@ -68,7 +72,7 @@ BOOST_AUTO_TEST_CASE(BinUtility_equidistant_binning) {
 // OPEN - equidistant binning tests
 BOOST_AUTO_TEST_CASE(BinUtility_arbitrary_binning) {
   std::vector<float> bvalues = {-5., 0., 1., 1.1, 8.};
-  BinUtility xUtil(bvalues, Acts::open, Acts::binX);
+  BinUtility xUtil(bvalues, Acts::open, Acts::AxisDirection::AxisX);
 
   // Underflow
   BOOST_CHECK_EQUAL(xUtil.bin(Vector3(-6., 0., 0.)), 0u);
@@ -88,13 +92,15 @@ BOOST_AUTO_TEST_CASE(BinUtility_arbitrary_binning) {
 BOOST_AUTO_TEST_CASE(BinUtility_transform) {
   Transform3 transform_LtoG = Transform3::Identity();
   transform_LtoG = transform_LtoG * Translation3(0., 0., -50);
-  transform_LtoG = transform_LtoG * AngleAxis3(M_PI / 4, Vector3(0, 0, 1));
+  transform_LtoG =
+      transform_LtoG * AngleAxis3(std::numbers::pi / 4., Vector3(0, 0, 1));
 
   Transform3 transform_GtoL = transform_LtoG.inverse();
 
-  BinUtility rUtil(10, 0., 100., open, binR);
-  BinUtility phiUtil(10, -M_PI, M_PI, closed, binPhi);
-  BinUtility zUtil(10, -100., 100., open, binZ);
+  BinUtility rUtil(10, 0., 100., open, AxisDirection::AxisR);
+  BinUtility phiUtil(10, -std::numbers::pi, std::numbers::pi, closed,
+                     AxisDirection::AxisPhi);
+  BinUtility zUtil(10, -100., 100., open, AxisDirection::AxisZ);
 
   BinUtility noTranform;
   noTranform += rUtil;
@@ -108,9 +114,9 @@ BOOST_AUTO_TEST_CASE(BinUtility_transform) {
 
   Vector3 pos1(0, 0, 0);
   Vector3 pos2(60, 0, 0);
-  Vector3 pos3(34, M_PI / 2, 0);
+  Vector3 pos3(34, std::numbers::pi / 2., 0);
   Vector3 pos4(0, 0, -80);
-  Vector3 pos5(80, -M_PI / 4, 50);
+  Vector3 pos5(80, -std::numbers::pi / 4., 50);
 
   for (int i = 0; i < 3; i++) {
     BOOST_CHECK_EQUAL(withTranform.bin(pos1, i),
@@ -126,5 +132,19 @@ BOOST_AUTO_TEST_CASE(BinUtility_transform) {
   }
 }
 
-}  // namespace Test
-}  // namespace Acts
+BOOST_AUTO_TEST_CASE(BinUtility_from_ProtoAxis) {
+  using enum AxisDirection;
+  using enum AxisBoundaryType;
+
+  DirectedProtoAxis epabX(AxisX, Bound, 0.0, 1.0, 10);
+  BinUtility buX(epabX);
+  BOOST_CHECK_EQUAL(buX.bins(), std::size_t{10});
+  BOOST_CHECK_EQUAL(buX.dimensions(), std::size_t{1});
+
+  DirectedProtoAxis epabY(AxisY, Bound, 0.0, 1.0, 10);
+  BinUtility buXY({epabX, epabY});
+  BOOST_CHECK_EQUAL(buXY.bins(), std::size_t{100});
+  BOOST_CHECK_EQUAL(buXY.dimensions(), std::size_t{2});
+}
+
+}  // namespace Acts::Test

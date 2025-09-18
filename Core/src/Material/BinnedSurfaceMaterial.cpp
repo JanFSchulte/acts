@@ -1,16 +1,18 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Material/BinnedSurfaceMaterial.hpp"
 
 #include "Acts/Material/MaterialSlab.hpp"
 
 #include <ostream>
+#include <utility>
+#include <vector>
 
 Acts::BinnedSurfaceMaterial::BinnedSurfaceMaterial(
     const BinUtility& binUtility, MaterialSlabVector fullProperties,
@@ -27,11 +29,10 @@ Acts::BinnedSurfaceMaterial::BinnedSurfaceMaterial(
       m_binUtility(binUtility),
       m_fullMaterial(std::move(fullProperties)) {}
 
-Acts::BinnedSurfaceMaterial& Acts::BinnedSurfaceMaterial::operator*=(
-    double scale) {
+Acts::BinnedSurfaceMaterial& Acts::BinnedSurfaceMaterial::scale(double factor) {
   for (auto& materialVector : m_fullMaterial) {
     for (auto& materialBin : materialVector) {
-      materialBin.scaleThickness(scale);
+      materialBin.scaleThickness(factor);
     }
   }
   return (*this);
@@ -40,16 +41,16 @@ Acts::BinnedSurfaceMaterial& Acts::BinnedSurfaceMaterial::operator*=(
 const Acts::MaterialSlab& Acts::BinnedSurfaceMaterial::materialSlab(
     const Vector2& lp) const {
   // the first bin
-  size_t ibin0 = m_binUtility.bin(lp, 0);
-  size_t ibin1 = m_binUtility.max(1) != 0u ? m_binUtility.bin(lp, 1) : 0;
+  std::size_t ibin0 = m_binUtility.bin(lp, 0);
+  std::size_t ibin1 = m_binUtility.max(1) != 0u ? m_binUtility.bin(lp, 1) : 0;
   return m_fullMaterial[ibin1][ibin0];
 }
 
 const Acts::MaterialSlab& Acts::BinnedSurfaceMaterial::materialSlab(
     const Acts::Vector3& gp) const {
   // the first bin
-  size_t ibin0 = m_binUtility.bin(gp, 0);
-  size_t ibin1 = m_binUtility.max(1) != 0u ? m_binUtility.bin(gp, 1) : 0;
+  std::size_t ibin0 = m_binUtility.bin(gp, 0);
+  std::size_t ibin1 = m_binUtility.max(1) != 0u ? m_binUtility.bin(gp, 1) : 0;
   return m_fullMaterial[ibin1][ibin0];
 }
 

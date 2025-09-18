@@ -1,18 +1,32 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021-2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/EventData/detail/CorrectedTransformationFreeToBound.hpp"
 
+#include "Acts/Definitions/TrackParametrization.hpp"
+#include "Acts/EventData/TransformationHelpers.hpp"
+#include "Acts/Surfaces/RegularSurface.hpp"
 #include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Utilities/Intersection.hpp"
+#include "Acts/Utilities/Result.hpp"
+#include "Acts/Utilities/ThrowAssert.hpp"
 
-Acts::FreeToBoundCorrection::FreeToBoundCorrection(bool apply_,
-                                                   ActsScalar alpha_,
-                                                   ActsScalar beta_)
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <memory>
+#include <ostream>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+Acts::FreeToBoundCorrection::FreeToBoundCorrection(bool apply_, double alpha_,
+                                                   double beta_)
     : apply(apply_), alpha(alpha_), beta(beta_) {}
 
 Acts::FreeToBoundCorrection::FreeToBoundCorrection(bool apply_)
@@ -23,8 +37,8 @@ Acts::FreeToBoundCorrection::operator bool() const {
 }
 
 Acts::detail::CorrectedFreeToBoundTransformer::CorrectedFreeToBoundTransformer(
-    ActsScalar alpha, ActsScalar beta, ActsScalar cosIncidentAngleMinCutoff,
-    ActsScalar cosIncidentAngleMaxCutoff)
+    double alpha, double beta, double cosIncidentAngleMinCutoff,
+    double cosIncidentAngleMaxCutoff)
     : m_alpha(alpha),
       m_beta(beta),
       m_cosIncidentAngleMinCutoff(cosIncidentAngleMinCutoff),
@@ -38,20 +52,21 @@ Acts::detail::CorrectedFreeToBoundTransformer::CorrectedFreeToBoundTransformer(
   m_cosIncidentAngleMaxCutoff = freeToBoundCorrection.cosIncidentAngleMaxCutoff;
 }
 
-std::optional<std::tuple<Acts::BoundVector, Acts::BoundSymMatrix>>
+std::optional<std::tuple<Acts::BoundVector, Acts::BoundSquareMatrix>>
 Acts::detail::CorrectedFreeToBoundTransformer::operator()(
     const Acts::FreeVector& freeParams,
-    const Acts::FreeSymMatrix& freeCovariance, const Acts::Surface& surface,
-    const Acts::GeometryContext& geoContext, NavigationDirection navDir,
-    LoggerWrapper logger) const {
+    const Acts::FreeSquareMatrix& freeCovariance, const Acts::Surface& surface,
+    const Acts::GeometryContext& geoContext, Direction navDir,
+    const Logger& logger) const {
   // Get the incidence angle
   Vector3 dir = freeParams.segment<3>(eFreeDir0);
-  Vector3 normal = surface.normal(geoContext);
-  ActsScalar absCosIncidenceAng = std::abs(dir.dot(normal));
+  Vector3 normal =
+      surface.normal(geoContext, freeParams.segment<3>(eFreePos0), dir);
+  double absCosIncidenceAng = std::abs(dir.dot(normal));
   // No correction if the incidentAngle is small enough (not necessary ) or too
   // large (correction could be invalid). Fall back to nominal free to bound
   // transformation
-  if (absCosIncidenceAng < m_cosIncidentAngleMinCutoff or
+  if (absCosIncidenceAng < m_cosIncidentAngleMinCutoff ||
       absCosIncidenceAng > m_cosIncidentAngleMaxCutoff) {
     ACTS_VERBOSE("Incident angle: " << std::acos(absCosIncidenceAng)
                                     << " is out of range for correction");
@@ -59,16 +74,16 @@ Acts::detail::CorrectedFreeToBoundTransformer::operator()(
   }
 
   // The number of sigma points
-  size_t sampleSize = 2 * eFreeSize + 1;
+  std::size_t sampleSize = 2 * eFreeSize + 1;
   // The sampled free parameters, the weight for measurement W_m and weight for
   // covariance, W_c
-  std::vector<std::tuple<FreeVector, ActsScalar, ActsScalar>> sampledFreeParams;
+  std::vector<std::tuple<FreeVector, double, double>> sampledFreeParams;
   sampledFreeParams.reserve(sampleSize);
 
   // Initialize the covariance sqrt root matrix
-  FreeSymMatrix covSqrt = FreeSymMatrix::Zero();
+  FreeSquareMatrix covSqrt = FreeSquareMatrix::Zero();
   // SVD decomposition: freeCovariance = U*S*U^T here
-  Eigen::JacobiSVD<FreeSymMatrix> svd(
+  Eigen::JacobiSVD<FreeSquareMatrix> svd(
       freeCovariance, Eigen::ComputeFullU | Eigen::ComputeFullV);
   auto S = svd.singularValues();
   FreeMatrix U = svd.matrixU();
@@ -83,11 +98,11 @@ Acts::detail::CorrectedFreeToBoundTransformer::operator()(
   covSqrt = U * D;
 
   // Define kappa = alpha*alpha*N
-  ActsScalar kappa = m_alpha * m_alpha * eFreeSize;
+  double kappa = m_alpha * m_alpha * static_cast<double>(eFreeSize);
   // lambda = alpha*alpha*N - N
-  ActsScalar lambda = kappa - eFreeSize;
+  double lambda = kappa - static_cast<double>(eFreeSize);
   // gamma = sqrt(labmda + N)
-  ActsScalar gamma = std::sqrt(kappa);
+  double gamma = std::sqrt(kappa);
 
   // Sample the free parameters
   // 1. the nominal parameter
@@ -105,11 +120,11 @@ Acts::detail::CorrectedFreeToBoundTransformer::operator()(
   // Initialize the mean of the bound parameters
   BoundVector bpMean = BoundVector::Zero();
   // Initialize the bound covariance
-  BoundSymMatrix bv = BoundSymMatrix::Zero();
+  BoundSquareMatrix bv = BoundSquareMatrix::Zero();
 
   // The transformed bound parameters and weight for each sampled free
   // parameters
-  std::vector<std::pair<BoundVector, ActsScalar>> transformedBoundParams;
+  std::vector<std::pair<BoundVector, double>> transformedBoundParams;
 
   // 1. The nominal one
   // The sampled free parameters, the weight for measurement W_m and weight for
@@ -117,9 +132,9 @@ Acts::detail::CorrectedFreeToBoundTransformer::operator()(
   const auto& [paramsNom, mweightNom, cweightNom] = sampledFreeParams[0];
   // Transform the free to bound
   auto nominalRes =
-      detail::transformFreeToBoundParameters(paramsNom, surface, geoContext);
+      transformFreeToBoundParameters(paramsNom, surface, geoContext);
   // Not successful, fall back to nominal free to bound transformation
-  if (not nominalRes.ok()) {
+  if (!nominalRes.ok()) {
     ACTS_WARNING(
         "Free to bound transformation for nominal free parameters failed.");
     return std::nullopt;
@@ -136,16 +151,18 @@ Acts::detail::CorrectedFreeToBoundTransformer::operator()(
 
     // Reintersect to get the corrected free params without boundary check
     SurfaceIntersection intersection =
-        surface.intersect(geoContext, params.segment<3>(eFreePos0),
-                          navDir * params.segment<3>(eFreeDir0), false);
-    correctedFreeParams.segment<3>(eFreePos0) =
-        intersection.intersection.position;
+        surface
+            .intersect(geoContext, params.segment<3>(eFreePos0),
+                       navDir * params.segment<3>(eFreeDir0),
+                       BoundaryTolerance::Infinite())
+            .closest();
+    correctedFreeParams.segment<3>(eFreePos0) = intersection.position();
 
     // Transform the free to bound
-    auto result = detail::transformFreeToBoundParameters(correctedFreeParams,
-                                                         surface, geoContext);
+    auto result = transformFreeToBoundParameters(correctedFreeParams, surface,
+                                                 geoContext);
     // Not successful, fall back to nominal free to bound transformation
-    if (not result.ok()) {
+    if (!result.ok()) {
       ACTS_WARNING(
           "Free to bound transformation for sampled free parameters: \n"
           << correctedFreeParams << " failed.");

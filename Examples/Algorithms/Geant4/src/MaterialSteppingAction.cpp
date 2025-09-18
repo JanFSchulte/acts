@@ -1,35 +1,39 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Geant4/MaterialSteppingAction.hpp"
 
+#include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/Material/Material.hpp"
 #include "Acts/Material/MaterialInteraction.hpp"
 #include "Acts/Material/MaterialSlab.hpp"
-#include "Acts/Propagator/MaterialInteractor.hpp"
-#include "ActsExamples/Geant4/EventStoreRegistry.hpp"
+#include "ActsExamples/Geant4/AlgebraConverters.hpp"
+#include "ActsExamples/Geant4/EventStore.hpp"
+
+#include <cstddef>
+#include <ostream>
+#include <unordered_map>
+#include <utility>
 
 #include <G4Material.hh>
 #include <G4RunManager.hh>
 #include <G4Step.hh>
 
-ActsExamples::MaterialSteppingAction::MaterialSteppingAction(
+namespace ActsExamples::Geant4 {
+
+MaterialSteppingAction::MaterialSteppingAction(
     const Config& cfg, std::unique_ptr<const Acts::Logger> logger)
     : G4UserSteppingAction(), m_cfg(cfg), m_logger(std::move(logger)) {}
 
-ActsExamples::MaterialSteppingAction::~MaterialSteppingAction() = default;
+MaterialSteppingAction::~MaterialSteppingAction() = default;
 
-void ActsExamples::MaterialSteppingAction::UserSteppingAction(
-    const G4Step* step) {
-  // Get the event data
-  auto& eventData = EventStoreRegistry::eventData();
-
+void MaterialSteppingAction::UserSteppingAction(const G4Step* step) {
   // Get the material & check if it is present
   G4Material* material = step->GetPreStepPoint()->GetMaterial();
   if (material == nullptr) {
@@ -40,7 +44,7 @@ void ActsExamples::MaterialSteppingAction::UserSteppingAction(
   std::string materialName = material->GetName();
   for (const auto& emat : m_cfg.excludeMaterials) {
     if (emat == materialName) {
-      ACTS_VERBOSE("Exclude step in material '" << materialName << ".");
+      ACTS_VERBOSE("Exclude step in material '" << materialName << "'.");
       return;
     }
   }
@@ -62,14 +66,14 @@ void ActsExamples::MaterialSteppingAction::UserSteppingAction(
   // the Geant4 docs). Need to compute average manually.
   const G4ElementVector* elements = material->GetElementVector();
   const G4double* fraction = material->GetFractionVector();
-  size_t nElements = material->GetNumberOfElements();
+  std::size_t nElements = material->GetNumberOfElements();
   double Ar = 0.;
   double Z = 0.;
   if (nElements == 1) {
     Ar = material->GetA() / (CLHEP::gram / CLHEP::mole);
     Z = material->GetZ();
   } else {
-    for (size_t i = 0; i < nElements; i++) {
+    for (std::size_t i = 0; i < nElements; i++) {
       Ar += elements->at(i)->GetA() * fraction[i] / (CLHEP::gram / CLHEP::mole);
       Z += elements->at(i)->GetZ() * fraction[i];
     }
@@ -81,26 +85,21 @@ void ActsExamples::MaterialSteppingAction::UserSteppingAction(
                          convertLength * step->GetStepLength());
 
   // Create the RecordedMaterialSlab
-  const auto& rawPos = step->GetPreStepPoint()->GetPosition();
-  const auto& rawDir = step->GetPreStepPoint()->GetMomentum();
   Acts::MaterialInteraction mInteraction;
   mInteraction.position =
-      Acts::Vector3(convertLength * rawPos.x(), convertLength * rawPos.y(),
-                    convertLength * rawPos.z());
-  mInteraction.direction = Acts::Vector3(rawDir.x(), rawDir.y(), rawDir.z());
-  mInteraction.direction.normalized();
+      convertPosition(step->GetPreStepPoint()->GetPosition());
+  mInteraction.direction =
+      convertDirection(step->GetPreStepPoint()->GetMomentum()).normalized();
   mInteraction.materialSlab = slab;
   mInteraction.pathCorrection = (step->GetStepLength() / CLHEP::mm);
 
   G4Track* g4Track = step->GetTrack();
-  size_t trackID = g4Track->GetTrackID();
-  auto& materialTracks = eventData.materialTracks;
-  if (materialTracks.find(trackID - 1) == materialTracks.end()) {
+  std::size_t trackID = g4Track->GetTrackID();
+  auto& materialTracks = eventStore().materialTracks;
+  if (!materialTracks.contains(trackID - 1)) {
     Acts::RecordedMaterialTrack rmTrack;
-    const auto& g4Vertex = g4Track->GetVertexPosition();
-    Acts::Vector3 vertex(g4Vertex[0], g4Vertex[1], g4Vertex[2]);
-    const auto& g4Direction = g4Track->GetMomentumDirection();
-    Acts::Vector3 direction(g4Direction[0], g4Direction[1], g4Direction[2]);
+    Acts::Vector3 vertex = convertPosition(g4Track->GetVertexPosition());
+    Acts::Vector3 direction = convertDirection(g4Track->GetMomentumDirection());
     rmTrack.first = {vertex, direction};
     rmTrack.second.materialInteractions.push_back(mInteraction);
     materialTracks[trackID - 1] = rmTrack;
@@ -109,3 +108,5 @@ void ActsExamples::MaterialSteppingAction::UserSteppingAction(
         mInteraction);
   }
 }
+
+}  // namespace ActsExamples::Geant4

@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
@@ -12,8 +12,8 @@
 
 #include <limits>
 
-namespace Acts {
-namespace Test {
+namespace Acts::Test {
+
 BOOST_AUTO_TEST_SUITE(Utilities)
 
 BOOST_AUTO_TEST_SUITE(RangeXD)
@@ -21,12 +21,12 @@ BOOST_AUTO_TEST_SUITE(RangeXD)
 BOOST_AUTO_TEST_CASE(default_constructor_double) {
   Acts::RangeXD<3, double> r;
 
-  BOOST_CHECK(r[0].min() == std::numeric_limits<double>::lowest());
-  BOOST_CHECK(r[0].max() == std::numeric_limits<double>::max());
-  BOOST_CHECK(r[1].min() == std::numeric_limits<double>::lowest());
-  BOOST_CHECK(r[1].max() == std::numeric_limits<double>::max());
-  BOOST_CHECK(r[2].min() == std::numeric_limits<double>::lowest());
-  BOOST_CHECK(r[2].max() == std::numeric_limits<double>::max());
+  BOOST_CHECK_EQUAL(r[0].min(), std::numeric_limits<double>::lowest());
+  BOOST_CHECK_EQUAL(r[0].max(), std::numeric_limits<double>::max());
+  BOOST_CHECK_EQUAL(r[1].min(), std::numeric_limits<double>::lowest());
+  BOOST_CHECK_EQUAL(r[1].max(), std::numeric_limits<double>::max());
+  BOOST_CHECK_EQUAL(r[2].min(), std::numeric_limits<double>::lowest());
+  BOOST_CHECK_EQUAL(r[2].max(), std::numeric_limits<double>::max());
 }
 
 BOOST_AUTO_TEST_CASE(mutate_ranges_double) {
@@ -36,12 +36,12 @@ BOOST_AUTO_TEST_CASE(mutate_ranges_double) {
   r[1].shrink(0.0, 50.0);
   r[2].shrinkMax(-20.0);
 
-  BOOST_CHECK(r[0].min() == -10.0);
-  BOOST_CHECK(r[0].max() == 10.0);
-  BOOST_CHECK(r[1].min() == 0.0);
-  BOOST_CHECK(r[1].max() == 50.0);
-  BOOST_CHECK(r[2].min() == std::numeric_limits<double>::lowest());
-  BOOST_CHECK(r[2].max() == -20.0);
+  BOOST_CHECK_EQUAL(r[0].min(), -10.0);
+  BOOST_CHECK_EQUAL(r[0].max(), 10.0);
+  BOOST_CHECK_EQUAL(r[1].min(), 0.0);
+  BOOST_CHECK_EQUAL(r[1].max(), 50.0);
+  BOOST_CHECK_EQUAL(r[2].min(), std::numeric_limits<double>::lowest());
+  BOOST_CHECK_EQUAL(r[2].max(), -20.0);
 }
 
 BOOST_AUTO_TEST_CASE(degenerate_double) {
@@ -190,5 +190,5 @@ BOOST_AUTO_TEST_CASE(intersection_false2_double) {
 BOOST_AUTO_TEST_SUITE_END()
 
 BOOST_AUTO_TEST_SUITE_END()
-}  // namespace Test
-}  // namespace Acts
+
+}  // namespace Acts::Test

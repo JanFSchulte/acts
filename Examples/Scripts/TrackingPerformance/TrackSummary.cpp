@@ -1,34 +1,45 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Utilities/Options.hpp"
 
+#include <algorithm>
+#include <array>
+#include <bitset>
+#include <cmath>
 #include <exception>
 #include <iostream>
+#include <limits>
+#include <numbers>
+#include <optional>
+#include <sstream>
 #include <string>
+#include <vector>
 
 #include <TApplication.h>
 #include <boost/program_options.hpp>
+#include <boost/version.hpp>
+#include <nlohmann/json.hpp>
 
 #define BOOST_AVAILABLE 1
-#if ((BOOST_VERSION / 100) % 1000) <= 71
+#if BOOST_VERSION < 107200
 // Boost <=1.71 and lower do not have progress_display.hpp as a replacement yet
 #include <boost/progress.hpp>
+
 using progress_display = boost::progress_display;
 #else
 // Boost >=1.72 can use this as a replacement
 #include <boost/timer/progress_display.hpp>
+
 using progress_display = boost::timer::progress_display;
 #endif
 
 #define NLOHMANN_AVAILABLE 1
-#include <nlohmann/json.hpp>
-
 #include "trackSummaryAnalysis.C"
 
 using namespace boost::program_options;
@@ -58,7 +69,7 @@ int main(int argc, char** argv) {
     ao("output,o", value<std::string>()->default_value(""),
        "Output ROOT file with histograms");
     ao("hist-bins", value<unsigned int>()->default_value(61),
-       "Numer of bins for the residual/pull histograms");
+       "Number of bins for the residual/pull histograms");
     ao("pull-range", value<float>()->default_value(5.),
        "Number of sigmas for the pull range.");
     ao("eta-bins", value<unsigned int>()->default_value(10),
@@ -69,14 +80,15 @@ int main(int argc, char** argv) {
     ao("phi-bins", value<unsigned int>()->default_value(10),
        "Number of bins in phi.");
     ao("phi-range",
-       value<Interval>()->value_name("MIN:MAX")->default_value({-M_PI, M_PI}),
+       value<Interval>()->value_name("MIN:MAX")->default_value(
+           {-std::numbers::pi, std::numbers::pi}),
        "Range for the phi bins.");
     ao("pt-borders", value<VariableReals>()->required(),
        "Transverse momentum borders.");
     ao("config-output", value<std::string>()->default_value(""),
-       "(Optional) output histrogram configuration json file.");
+       "(Optional) output histogram configuration json file.");
     ao("config-input", value<std::string>()->default_value(""),
-       "(Optional) input histrogram configuration json file.");
+       "(Optional) input histogram configuration json file.");
     // Define all parameters (overwrites individual parameters)
     ao("all", bool_switch(),
        "Process all residual/pull and auxiliary parameters");
@@ -99,7 +111,7 @@ int main(int argc, char** argv) {
     variables_map vm;
     store(command_line_parser(argc, argv).options(description).run(), vm);
 
-    if (vm.count("help") != 0u) {
+    if (vm.contains("help")) {
       std::cout << description;
       return 1;
     }
@@ -131,8 +143,8 @@ int main(int argc, char** argv) {
     unsigned int nPhiBins = vm["phi-bins"].as<unsigned int>();
     auto phiInterval = vm["phi-range"].as<Interval>();
     std::array<float, 2> phiRange = {
-        static_cast<float>(phiInterval.lower.value_or(-M_PI)),
-        static_cast<float>(phiInterval.upper.value_or(M_PI))};
+        static_cast<float>(phiInterval.lower.value_or(-std::numbers::pi)),
+        static_cast<float>(phiInterval.upper.value_or(std::numbers::pi))};
 
     auto ptBorders = vm["pt-borders"].as<VariableReals>().values;
     if (ptBorders.empty()) {

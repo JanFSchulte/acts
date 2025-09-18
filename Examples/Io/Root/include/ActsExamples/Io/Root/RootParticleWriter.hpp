@@ -1,31 +1,35 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include "Acts/Utilities/Logger.hpp"
 #include "ActsExamples/EventData/SimParticle.hpp"
+#include "ActsExamples/Framework/ProcessCode.hpp"
 #include "ActsExamples/Framework/WriterT.hpp"
 
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <vector>
 
 class TFile;
 class TTree;
 
 namespace ActsExamples {
+struct AlgorithmContext;
 
 /// Write out particles as a flat TTree.
 ///
 /// Each entry in the TTree corresponds to one particle for optimum writing
 /// speed. The event number is part of the written data.
 ///
-/// Safe to use from multiple writer threads. To avoid thread-saftey issues,
+/// Safe to use from multiple writer threads. To avoid thread-safety issues,
 /// the writer must be the sole owner of the underlying file. Thus, the
 /// output file pointer can not be given from the outside.
 class RootParticleWriter final : public WriterT<SimParticleContainer> {
@@ -51,7 +55,7 @@ class RootParticleWriter final : public WriterT<SimParticleContainer> {
   ~RootParticleWriter() override;
 
   /// End-of-run hook
-  ProcessCode endRun() override;
+  ProcessCode finalize() override;
 
   /// Get readonly access to the config parameters
   const Config& config() const { return m_cfg; }
@@ -66,22 +70,24 @@ class RootParticleWriter final : public WriterT<SimParticleContainer> {
 
  private:
   Config m_cfg;
+
   std::mutex m_writeMutex;
+
   TFile* m_outputFile = nullptr;
   TTree* m_outputTree = nullptr;
+
   /// Event identifier.
-  uint32_t m_eventId = 0;
+  std::uint32_t m_eventId = 0;
   /// Event-unique particle identifier a.k.a barcode.
-  std::vector<uint64_t> m_particleId;
+  std::vector<std::uint64_t> m_particleId;
   /// Particle type a.k.a. PDG particle number
-  std::vector<int32_t> m_particleType;
+  std::vector<std::int32_t> m_particleType;
   /// Production process type, i.e. what generated the particle.
-  std::vector<uint32_t> m_process;
+  std::vector<std::uint32_t> m_process;
   /// Production position components in mm.
   std::vector<float> m_vx;
   std::vector<float> m_vy;
   std::vector<float> m_vz;
-  // Production time in ns.
   std::vector<float> m_vt;
   /// Total momentum in GeV
   std::vector<float> m_p;
@@ -101,11 +107,22 @@ class RootParticleWriter final : public WriterT<SimParticleContainer> {
   /// Transverse momentum in GeV.
   std::vector<float> m_pt;
   // Decoded particle identifier; see Barcode definition for details.
-  std::vector<uint32_t> m_vertexPrimary;
-  std::vector<uint32_t> m_vertexSecondary;
-  std::vector<uint32_t> m_particle;
-  std::vector<uint32_t> m_generation;
-  std::vector<uint32_t> m_subParticle;
+  std::vector<std::uint32_t> m_vertexPrimary;
+  std::vector<std::uint32_t> m_vertexSecondary;
+  std::vector<std::uint32_t> m_particle;
+  std::vector<std::uint32_t> m_generation;
+  std::vector<std::uint32_t> m_subParticle;
+
+  /// Total energy loss in GeV.
+  std::vector<float> m_eLoss;
+  /// Accumulated material
+  std::vector<float> m_pathInX0;
+  /// Accumulated material
+  std::vector<float> m_pathInL0;
+  /// Number of hits.
+  std::vector<std::int32_t> m_numberOfHits;
+  /// Particle outcome
+  std::vector<std::uint32_t> m_outcome;
 };
 
 }  // namespace ActsExamples

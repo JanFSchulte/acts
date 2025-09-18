@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -14,7 +14,6 @@
 #include "Acts/MagneticField/MagneticFieldProvider.hpp"
 #include "Acts/Utilities/Interpolation.hpp"
 #include "Acts/Utilities/Result.hpp"
-#include "Acts/Utilities/detail/Grid.hpp"
 
 #include <functional>
 #include <optional>
@@ -27,7 +26,7 @@ class InterpolatedMagneticField : public MagneticFieldProvider {
   /// @brief get the number of bins for all axes of the field map
   ///
   /// @return vector returning number of bins for all field map axes
-  virtual std::vector<size_t> getNBins() const = 0;
+  virtual std::vector<std::size_t> getNBins() const = 0;
 
   /// @brief get the minimum value of all axes of the field map
   ///
@@ -77,7 +76,7 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
  public:
   using Grid = grid_t;
   using FieldType = typename Grid::value_type;
-  static constexpr size_t DIM_POS = Grid::DIM;
+  static constexpr std::size_t DIM_POS = Grid::DIM;
 
   /// @brief struct representing smallest grid unit in magnetic field grid
   ///
@@ -146,9 +145,7 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
 
   struct Cache {
     /// @brief Constructor with magnetic field context
-    ///
-    /// @param mctx the magnetic field context
-    Cache(const MagneticFieldContext& mctx) { (void)mctx; }
+    explicit Cache(const MagneticFieldContext& /*mctx*/) {}
 
     std::optional<FieldCell> fieldCell;
     bool initialized = false;
@@ -177,7 +174,7 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
 
   /// @brief default constructor
   ///
-  InterpolatedBFieldMap(Config cfg) : m_cfg{std::move(cfg)} {
+  explicit InterpolatedBFieldMap(Config cfg) : m_cfg{std::move(cfg)} {
     typename Grid::index_t minBin{};
     minBin.fill(1);
     m_lowerLeft = m_cfg.grid.lowerLeftBinEdge(minBin);
@@ -198,18 +195,20 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
     const auto& upperRight = m_cfg.grid.upperRightBinEdge(indices);
 
     // loop through all corner points
-    constexpr size_t nCorners = 1 << DIM_POS;
-    std::array<Vector3, nCorners> neighbors{Vector3{0.0, 0.0, 0.0}};
+    constexpr std::size_t nCorners = 1 << DIM_POS;
+    std::array<Vector3, nCorners> neighbors;
     const auto& cornerIndices = m_cfg.grid.closestPointsIndices(gridPosition);
 
     if (!isInsideLocal(gridPosition)) {
       return MagneticFieldError::OutOfBounds;
     }
 
-    size_t i = 0;
-    for (size_t index : cornerIndices) {
+    std::size_t i = 0;
+    for (std::size_t index : cornerIndices) {
       neighbors.at(i++) = m_cfg.transformBField(m_cfg.grid.at(index), position);
     }
+
+    assert(i == nCorners);
 
     return FieldCell(lowerLeft, upperRight, std::move(neighbors));
   }
@@ -217,9 +216,9 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
   /// @brief get the number of bins for all axes of the field map
   ///
   /// @return vector returning number of bins for all field map axes
-  std::vector<size_t> getNBins() const final {
+  std::vector<std::size_t> getNBins() const final {
     auto nBinsArray = m_cfg.grid.numLocalBins();
-    return std::vector<size_t>(nBinsArray.begin(), nBinsArray.end());
+    return std::vector<std::size_t>(nBinsArray.begin(), nBinsArray.end());
   }
 
   /// @brief get the minimum value of all axes of the field map
@@ -268,7 +267,7 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
   /// @copydoc MagneticFieldProvider::makeCache(const MagneticFieldContext&) const
   MagneticFieldProvider::Cache makeCache(
       const MagneticFieldContext& mctx) const final {
-    return MagneticFieldProvider::Cache::make<Cache>(mctx);
+    return MagneticFieldProvider::Cache{std::in_place_type<Cache>, mctx};
   }
 
   /// @brief retrieve field at given position
@@ -297,7 +296,7 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
   /// @copydoc MagneticFieldProvider::getField(const Vector3&,MagneticFieldProvider::Cache&) const
   Result<Vector3> getField(const Vector3& position,
                            MagneticFieldProvider::Cache& cache) const final {
-    Cache& lcache = cache.get<Cache>();
+    Cache& lcache = cache.as<Cache>();
     const auto gridPosition = m_cfg.transformPos(position);
     if (!lcache.fieldCell || !(*lcache.fieldCell).isInside(gridPosition)) {
       auto res = getFieldCell(position);
@@ -307,18 +306,6 @@ class InterpolatedBFieldMap : public InterpolatedMagneticField {
       lcache.fieldCell = *res;
     }
     return Result<Vector3>::success((*lcache.fieldCell).getField(gridPosition));
-  }
-
-  /// @copydoc MagneticFieldProvider::getFieldGradient(const Vector3&,ActsMatrix<3,3>&,MagneticFieldProvider::Cache&) const
-  ///
-  /// @note currently the derivative is not calculated
-  /// @note Cache is not used currently
-  /// @todo return derivative
-  Result<Vector3> getFieldGradient(
-      const Vector3& position, ActsMatrix<3, 3>& derivative,
-      MagneticFieldProvider::Cache& cache) const final {
-    (void)derivative;
-    return getField(position, cache);
   }
 
  private:

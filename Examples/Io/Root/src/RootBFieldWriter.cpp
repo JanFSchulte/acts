@@ -1,12 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Io/Root/RootBFieldWriter.hpp"
+
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Definitions/Units.hpp"
+#include "Acts/MagneticField/MagneticFieldContext.hpp"
+#include "Acts/Utilities/VectorHelpers.hpp"
+
+#include <cassert>
+#include <ios>
+#include <sstream>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include <TFile.h>
+#include <TTree.h>
 
 namespace ActsExamples {
 
@@ -14,9 +29,6 @@ namespace ActsExamples {
 void RootBFieldWriter::run(const Config& config,
                            std::unique_ptr<const Acts::Logger> p_logger) {
   // Set up (local) logging
-  // @todo Remove dangerous using declaration once the logger macro
-  // tolerates it
-  using namespace Acts;
   ACTS_LOCAL_LOGGER(std::move(p_logger))
 
   Acts::MagneticFieldContext bFieldContext;
@@ -32,13 +44,13 @@ void RootBFieldWriter::run(const Config& config,
 
   // Setup ROOT I/O
   ACTS_INFO("Registering new ROOT output File : " << config.fileName);
-  TFile* outputFile =
-      TFile::Open(config.fileName.c_str(), config.fileMode.c_str());
+  std::unique_ptr<TFile> outputFile(
+      TFile::Open(config.fileName.c_str(), config.fileMode.c_str()));
   if (outputFile == nullptr) {
     throw std::ios_base::failure("Could not open '" + config.fileName + "'");
   }
   TTree* outputTree = new TTree(config.treeName.c_str(),
-                                config.treeName.c_str(), 99, outputFile);
+                                config.treeName.c_str(), 99, outputFile.get());
   if (outputTree == nullptr) {
     throw std::bad_alloc();
   }
@@ -75,7 +87,7 @@ void RootBFieldWriter::run(const Config& config,
     // Write out the interpolated magnetic field map
     double minX = 0., minY = 0., minZ = 0.;
     double maxX = 0., maxY = 0., maxZ = 0.;
-    size_t nBinsX = 0, nBinsY = 0, nBinsZ = 0;
+    std::size_t nBinsX = 0, nBinsY = 0, nBinsZ = 0;
 
     // The position values in xyz
     double x = 0;
@@ -156,14 +168,14 @@ void RootBFieldWriter::run(const Config& config,
     double stepY = (maxY - minY) / (nBinsY - 1);
     double stepZ = (maxZ - minZ) / (nBinsZ - 1);
 
-    for (size_t i = 0; i < nBinsX; i++) {
+    for (std::size_t i = 0; i < nBinsX; i++) {
       double raw_x = minX + i * stepX;
-      for (size_t j = 0; j < nBinsY; j++) {
+      for (std::size_t j = 0; j < nBinsY; j++) {
         double raw_y = minY + j * stepY;
-        for (size_t k = 0; k < nBinsZ; k++) {
+        for (std::size_t k = 0; k < nBinsZ; k++) {
           double raw_z = minZ + k * stepZ;
           Acts::Vector3 position(raw_x, raw_y, raw_z);
-          Vector3 bField = config.bField->getFieldUnchecked(position);
+          Acts::Vector3 bField = config.bField->getFieldUnchecked(position);
 
           x = raw_x / Acts::UnitConstants::mm;
           y = raw_y / Acts::UnitConstants::mm;
@@ -173,8 +185,8 @@ void RootBFieldWriter::run(const Config& config,
           Bz = bField.z() / Acts::UnitConstants::T;
           outputTree->Fill();
         }  // for z
-      }    // for y
-    }      // for x
+      }  // for y
+    }  // for x
 
   } else {
     ACTS_INFO("Map will be written out in cylinder coordinates (r,z).");
@@ -192,7 +204,7 @@ void RootBFieldWriter::run(const Config& config,
 
     double minR = 0, maxR = 0;
     double minZ = 0, maxZ = 0;
-    size_t nBinsR = 0, nBinsZ = 0;
+    std::size_t nBinsR = 0, nBinsZ = 0;
 
     if (config.rBounds && config.zBounds) {
       ACTS_INFO("User defined ranges handed over.");
@@ -242,9 +254,9 @@ void RootBFieldWriter::run(const Config& config,
     double stepR = (maxR - minR) / (nBinsR - 1);
     double stepZ = (maxZ - minZ) / (nBinsZ - 1);
 
-    for (size_t k = 0; k < nBinsZ; k++) {
+    for (std::size_t k = 0; k < nBinsZ; k++) {
       double raw_z = minZ + k * stepZ;
-      for (size_t j = 0; j < nBinsR; j++) {
+      for (std::size_t j = 0; j < nBinsR; j++) {
         double raw_r = minR + j * stepR;
         Acts::Vector3 position(raw_r, 0.0, raw_z);  // position at phi=0
         ACTS_VERBOSE("Requesting position: " << position.transpose());
@@ -252,15 +264,15 @@ void RootBFieldWriter::run(const Config& config,
         z = raw_z / Acts::UnitConstants::mm;
         r = raw_r / Acts::UnitConstants::mm;
         Bz = bField.z() / Acts::UnitConstants::T;
-        Br = VectorHelpers::perp(bField) / Acts::UnitConstants::T;
+        Br = Acts::VectorHelpers::perp(bField) / Acts::UnitConstants::T;
         outputTree->Fill();
       }  // for R
-    }    // for z
+    }  // for z
   }
 
   // Tear down ROOT I/O
   ACTS_INFO("Closing and Writing ROOT output File : " << config.fileName);
   outputTree->Write();
-  delete outputFile;
 }
+
 }  // namespace ActsExamples

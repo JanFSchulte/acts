@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -46,10 +46,10 @@ class ILayerArrayCreator {
   /// @param btype is the binning type
   /// @param bvalue is the value in which the binning should be done
   ///
-  /// @return unqiue pointer to a new LayerArray
+  /// @return unique pointer to a new LayerArray
   virtual std::unique_ptr<const LayerArray> layerArray(
       const GeometryContext& gctx, const LayerVector& layers, double min,
       double max, BinningType btype = arbitrary,
-      BinningValue bvalue = binX) const = 0;
+      AxisDirection bvalue = AxisDirection::AxisX) const = 0;
 };
 }  // namespace Acts

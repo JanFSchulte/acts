@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -41,16 +41,15 @@ struct BetheBloch {
                                      const Acts::MaterialSlab &slab,
                                      Particle &particle) const {
     // compute energy loss distribution parameters
-    const auto pdg = particle.pdg();
-    const auto m = particle.mass();
-    const auto qOverP = particle.charge() / particle.absoluteMomentum();
-    const auto q = particle.charge();
+    const float m = particle.mass();
+    const float qOverP = particle.qOverP();
+    const float absQ = particle.absoluteCharge();
     // most probable value
-    const auto energyLoss =
-        Acts::computeEnergyLossLandau(slab, pdg, m, qOverP, q);
+    const float energyLoss =
+        Acts::computeEnergyLossLandau(slab, m, qOverP, absQ);
     // Gaussian-equivalent sigma
-    const auto energyLossSigma =
-        Acts::computeEnergyLossLandauSigma(slab, pdg, m, qOverP, q);
+    const float energyLossSigma =
+        Acts::computeEnergyLossLandauSigma(slab, m, qOverP, absQ);
 
     // Simulate the energy loss
     // TODO landau location and scale parameters are not identical to the most

@@ -1,11 +1,15 @@
 import os
+import shutil
 from typing import List, Union
 import contextlib
 
 import acts
-from acts.examples import BareAlgorithm
+from acts.examples import IAlgorithm
 
-geant4Enabled = any(v.startswith("G4") for v in os.environ.keys())
+geant4Enabled = (
+    any(v.startswith("G4") for v in os.environ.keys())
+    or "GEANT4_DATA_DIR" in os.environ
+)
 if geant4Enabled:
     try:
         import acts.examples.geant4
@@ -25,6 +29,13 @@ except ImportError:
         warnings.warn(
             "ROOT likely built without/with incompatible PyROOT. Skipping tests that need ROOT"
         )
+
+try:
+    import acts
+
+    geomodelEnabled = hasattr(acts, "geomodel")
+except ImportError:
+    geomodelEnabled = False
 
 dd4hepEnabled = "DD4hep_DIR" in os.environ
 if dd4hepEnabled:
@@ -47,10 +58,61 @@ try:
 except ImportError:
     edm4hepEnabled = False
 
-isCI = os.environ.get("CI", "false") == "true"
+try:
+    import acts.examples.onnx
+
+    onnxEnabled = True
+except ImportError:
+    onnxEnabled = False
+
+try:
+    from acts import covfie
+
+    covfieEnabled = True
+except ImportError:
+    covfieEnabled = False
 
 
-class AssertCollectionExistsAlg(BareAlgorithm):
+try:
+    import acts.examples
+
+    pythia8Enabled = hasattr(acts.examples, "pythia8")
+except ImportError:
+    pythia8Enabled = False
+
+try:
+    import acts.examples
+
+    hashingSeedingEnabled = hasattr(acts.examples, "hashing")
+except ImportError:
+    hashingSeedingEnabled = False
+
+
+gnnEnabled = shutil.which("nvidia-smi") is not None
+if gnnEnabled:
+    try:
+        from acts.examples import TrackFindingAlgorithmGnn
+    except ImportError:
+        gnnEnabled = False
+
+try:
+    import podio
+
+    podioEnabled = True
+except ModuleNotFoundError:
+    podioEnabled = False
+except ImportError:
+    podioEnabled = False
+
+isCI = os.environ.get("CI") is not None
+
+if isCI:
+    for k, v in dict(locals()).items():
+        if k.endswith("Enabled"):
+            locals()[k] = True
+
+
+class AssertCollectionExistsAlg(IAlgorithm):
     events_seen = 0
     collections: List[str]
 
@@ -66,13 +128,18 @@ class AssertCollectionExistsAlg(BareAlgorithm):
             self.collections = [collections]
         else:
             self.collections = collections
-        BareAlgorithm.__init__(self, name=name, level=level, *args, **kwargs)
+        IAlgorithm.__init__(self, name=name, level=level, *args, **kwargs)
 
     def execute(self, ctx):
-        for collection in self.collections:
-            assert ctx.eventStore.exists(collection), f"{collection} does not exist"
-        self.events_seen += 1
-        return acts.examples.ProcessCode.SUCCESS
+        try:
+            for collection in self.collections:
+                assert ctx.eventStore.exists(collection), f"{collection} does not exist"
+            self.events_seen += 1
+            return acts.examples.ProcessCode.SUCCESS
+        except AssertionError:
+            print("Available collections:")
+            print(ctx.eventStore.keys)
+            raise
 
 
 doHashChecks = os.environ.get("ROOT_HASH_CHECKS", "") != "" or "CI" in os.environ

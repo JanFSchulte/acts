@@ -1,55 +1,54 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/data/test_case.hpp>
-#include <boost/test/tools/output_test_stream.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Definitions/Direction.hpp"
+#include "Acts/Definitions/TrackParametrization.hpp"
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/EventData/TrackParameters.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
+#include "Acts/Geometry/GeometryIdentifier.hpp"
 #include "Acts/MagneticField/ConstantBField.hpp"
 #include "Acts/MagneticField/MagneticFieldContext.hpp"
-#include "Acts/Material/Material.hpp"
-#include "Acts/Propagator/ActionList.hpp"
+#include "Acts/Propagator/ActorList.hpp"
 #include "Acts/Propagator/EigenStepper.hpp"
 #include "Acts/Propagator/MaterialInteractor.hpp"
 #include "Acts/Propagator/Navigator.hpp"
 #include "Acts/Propagator/Propagator.hpp"
 #include "Acts/Propagator/StraightLineStepper.hpp"
-#include "Acts/Surfaces/CylinderSurface.hpp"
+#include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Tests/CommonHelpers/CylindricalTrackingGeometry.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 
+#include <cmath>
+#include <iostream>
 #include <memory>
+#include <numbers>
+#include <optional>
+#include <random>
+#include <utility>
+#include <vector>
 
 namespace bdata = boost::unit_test::data;
-namespace tt = boost::test_tools;
 using namespace Acts::UnitLiterals;
 
-namespace Acts {
-namespace Test {
+namespace Acts::Test {
 
 // Create a test context
 GeometryContext tgContext = GeometryContext();
 MagneticFieldContext mfContext = MagneticFieldContext();
 
 // Global definitions
-// The path limit abort
-using path_limit = PathLimitReached;
-
 CylindricalTrackingGeometry cGeometry(tgContext);
 auto tGeometry = cGeometry();
-
-// create a navigator for this tracking geometry
-Navigator navigatorES({tGeometry});
-Navigator navigatorSL({tGeometry});
 
 using BField = ConstantBField;
 using EigenStepper = Acts::EigenStepper<>;
@@ -58,83 +57,56 @@ using StraightLinePropagator = Propagator<StraightLineStepper, Navigator>;
 
 const double Bz = 2_T;
 auto bField = std::make_shared<BField>(Vector3{0, 0, Bz});
+
 EigenStepper estepper(bField);
-EigenPropagator epropagator(std::move(estepper), std::move(navigatorES));
+Navigator esnavigator({tGeometry});
+EigenPropagator epropagator(std::move(estepper), std::move(esnavigator));
 
 StraightLineStepper slstepper;
-StraightLinePropagator slpropagator(slstepper, std::move(navigatorSL));
-const int ntests = 500;
-const int skip = 0;
-bool debugModeFwd = false;
-bool debugModeBwd = false;
-bool debugModeFwdStep = false;
-bool debugModeBwdStep = false;
+Navigator slnavigator({tGeometry});
+StraightLinePropagator slpropagator(slstepper, std::move(slnavigator));
 
-/// the actual test nethod that runs the test
-/// can be used with several propagator types
+int ntests = 500;
+int skip = 0;
+bool debugMode = false;
+
+/// the actual test nethod that runs the test can be used with several
+/// propagator types
+///
 /// @tparam propagator_t is the actual propagator type
 ///
 /// @param prop is the propagator instance
-/// @param pT the transverse momentum
-/// @param phi the azimuthal angle of the track at creation
-/// @param theta the polar angle of the track at creation
-/// @param charge is the charge of the particle
-/// @param index is the run index from the test
+/// @param start the start parameters
 template <typename propagator_t>
-void runTest(const propagator_t& prop, double pT, double phi, double theta,
-             int charge, double time, int index) {
-  double p = pT / sin(theta);
-  double q = -1 + 2 * charge;
-
-  if (index < skip) {
-    return;
-  }
-
-  // define start parameters
-  BoundSymMatrix cov;
-  // take some major correlations (off-diagonals)
-  // clang-format off
-    cov <<
-     10_mm, 0, 0.123, 0, 0.5, 0,
-     0, 10_mm, 0, 0.162, 0, 0,
-     0.123, 0, 0.1, 0, 0, 0,
-     0, 0.162, 0, 0.1, 0, 0,
-     0.5, 0, 0, 0, 1_e / 10_GeV, 0,
-     0, 0, 0, 0, 0, 1_us;
-  // clang-format on
-  std::cout << cov.determinant() << std::endl;
-  CurvilinearTrackParameters start(Vector4(0, 0, 0, time), phi, theta, q / p,
-                                   cov);
-
+void runTest(const propagator_t& prop, const BoundTrackParameters& start) {
   // Action list and abort list
-  using ActionListType = ActionList<MaterialInteractor>;
-  using AbortListType = AbortList<>;
+  using ActorList = ActorList<MaterialInteractor>;
 
-  using Options = PropagatorOptions<ActionListType, AbortListType>;
-  Options fwdOptions(tgContext, mfContext, getDummyLogger());
-
-  fwdOptions.maxStepSize = 25_cm;
+  using Options = typename propagator_t::template Options<ActorList>;
+  Options fwdOptions(tgContext, mfContext);
+  fwdOptions.stepping.maxStepSize = 25_cm;
   fwdOptions.pathLimit = 25_cm;
 
   // get the material collector and configure it
   auto& fwdMaterialInteractor =
-      fwdOptions.actionList.template get<MaterialInteractor>();
+      fwdOptions.actorList.template get<MaterialInteractor>();
   fwdMaterialInteractor.recordInteractions = true;
   fwdMaterialInteractor.energyLoss = false;
   fwdMaterialInteractor.multipleScattering = false;
 
-  if (debugModeFwd) {
+  if (debugMode) {
     std::cout << ">>> Forward Propagation : start." << std::endl;
   }
   // forward material test
   const auto& fwdResult = prop.propagate(start, fwdOptions).value();
-  auto& fwdMaterial = fwdResult.template get<MaterialInteractor::result_type>();
-
-  double fwdStepMaterialInX0 = 0.;
-  double fwdStepMaterialInL0 = 0.;
+  const auto& fwdMaterial =
+      fwdResult.template get<MaterialInteractor::result_type>();
   // check that the collected material is not zero
   BOOST_CHECK_NE(fwdMaterial.materialInX0, 0.);
   BOOST_CHECK_NE(fwdMaterial.materialInL0, 0.);
+
+  double fwdStepMaterialInX0 = 0.;
+  double fwdStepMaterialInL0 = 0.;
   // check that the sum of all steps is the total material
   for (auto& mInteraction : fwdMaterial.materialInteractions) {
     fwdStepMaterialInX0 += mInteraction.materialSlab.thicknessInX0();
@@ -144,7 +116,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   CHECK_CLOSE_REL(fwdMaterial.materialInL0, fwdStepMaterialInL0, 1e-3);
 
   // get the forward output to the screen
-  if (debugModeFwd) {
+  if (debugMode) {
     // check if the surfaces are free
     std::cout << ">>> Material steps found on ..." << std::endl;
     for (auto& fwdStepsC : fwdMaterial.materialInteractions) {
@@ -154,51 +126,47 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   }
 
   // backward material test
-  Options bwdOptions(tgContext, mfContext, getDummyLogger());
-  bwdOptions.maxStepSize = -25_cm;
+  Options bwdOptions(tgContext, mfContext);
+  bwdOptions.stepping.maxStepSize = 25_cm;
   bwdOptions.pathLimit = -25_cm;
-  bwdOptions.direction = NavigationDirection::Backward;
+  bwdOptions.direction = Direction::Backward();
 
   // get the material collector and configure it
   auto& bwdMaterialInteractor =
-      bwdOptions.actionList.template get<MaterialInteractor>();
+      bwdOptions.actorList.template get<MaterialInteractor>();
   bwdMaterialInteractor.recordInteractions = true;
   bwdMaterialInteractor.energyLoss = false;
   bwdMaterialInteractor.multipleScattering = false;
 
   const auto& startSurface = start.referenceSurface();
 
-  if (debugModeBwd) {
+  if (debugMode) {
     std::cout << ">>> Backward Propagation : start." << std::endl;
   }
   const auto& bwdResult =
       prop.propagate(*fwdResult.endParameters, startSurface, bwdOptions)
           .value();
-
-  if (debugModeBwd) {
+  if (debugMode) {
     std::cout << ">>> Backward Propagation : end." << std::endl;
   }
-
-  auto& bwdMaterial =
+  const auto& bwdMaterial =
       bwdResult.template get<typename MaterialInteractor::result_type>();
-
-  double bwdStepMaterialInX0 = 0.;
-  double bwdStepMaterialInL0 = 0.;
-
   // check that the collected material is not zero
   BOOST_CHECK_NE(bwdMaterial.materialInX0, 0.);
   BOOST_CHECK_NE(bwdMaterial.materialInL0, 0.);
+
+  double bwdStepMaterialInX0 = 0.;
+  double bwdStepMaterialInL0 = 0.;
   // check that the sum of all steps is the total material
   for (auto& mInteraction : bwdMaterial.materialInteractions) {
     bwdStepMaterialInX0 += mInteraction.materialSlab.thicknessInX0();
     bwdStepMaterialInL0 += mInteraction.materialSlab.thicknessInL0();
   }
-
   CHECK_CLOSE_REL(bwdMaterial.materialInX0, bwdStepMaterialInX0, 1e-3);
   CHECK_CLOSE_REL(bwdMaterial.materialInL0, bwdStepMaterialInL0, 1e-3);
 
   // get the backward output to the screen
-  if (debugModeBwd) {
+  if (debugMode) {
     // check if the surfaces are free
     std::cout << ">>> Material steps found on ..." << std::endl;
     for (auto& bwdStepsC : bwdMaterial.materialInteractions) {
@@ -212,17 +180,17 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
                     fwdMaterial.materialInteractions.size());
 
   CHECK_CLOSE_REL(bwdMaterial.materialInX0, fwdMaterial.materialInX0, 1e-3);
-  CHECK_CLOSE_REL(bwdMaterial.materialInL0, bwdMaterial.materialInL0, 1e-3);
+  CHECK_CLOSE_REL(bwdMaterial.materialInL0, fwdMaterial.materialInL0, 1e-3);
 
   // stepping from one surface to the next
   // now go from surface to surface and check
-  Options fwdStepOptions(tgContext, mfContext, getDummyLogger());
-  fwdStepOptions.maxStepSize = 25_cm;
+  Options fwdStepOptions(tgContext, mfContext);
+  fwdStepOptions.stepping.maxStepSize = 25_cm;
   fwdStepOptions.pathLimit = 25_cm;
 
   // get the material collector and configure it
   auto& fwdStepMaterialInteractor =
-      fwdStepOptions.actionList.template get<MaterialInteractor>();
+      fwdStepOptions.actorList.template get<MaterialInteractor>();
   fwdStepMaterialInteractor.recordInteractions = true;
   fwdStepMaterialInteractor.energyLoss = false;
   fwdStepMaterialInteractor.multipleScattering = false;
@@ -230,7 +198,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   double fwdStepStepMaterialInX0 = 0.;
   double fwdStepStepMaterialInL0 = 0.;
 
-  if (debugModeFwdStep) {
+  if (debugMode) {
     // check if the surfaces are free
     std::cout << ">>> Forward steps to be processed sequentially ..."
               << std::endl;
@@ -244,7 +212,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   BoundTrackParameters sParameters = start;
   std::vector<BoundTrackParameters> stepParameters;
   for (auto& fwdSteps : fwdMaterial.materialInteractions) {
-    if (debugModeFwdStep) {
+    if (debugMode) {
       std::cout << ">>> Forward step : "
                 << sParameters.referenceSurface().geometryId() << " --> "
                 << fwdSteps.surface->geometryId() << std::endl;
@@ -269,7 +237,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   // final destination surface
   const Surface& dSurface = fwdResult.endParameters->referenceSurface();
 
-  if (debugModeFwdStep) {
+  if (debugMode) {
     std::cout << ">>> Forward step : "
               << sParameters.referenceSurface().geometryId() << " --> "
               << dSurface.geometryId() << std::endl;
@@ -289,15 +257,14 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
 
   // stepping from one surface to the next : backwards
   // now go from surface to surface and check
-  Options bwdStepOptions(tgContext, mfContext, getDummyLogger());
-
-  bwdStepOptions.maxStepSize = -25_cm;
+  Options bwdStepOptions(tgContext, mfContext);
+  bwdStepOptions.stepping.maxStepSize = 25_cm;
   bwdStepOptions.pathLimit = -25_cm;
-  bwdStepOptions.direction = NavigationDirection::Backward;
+  bwdStepOptions.direction = Direction::Backward();
 
   // get the material collector and configure it
   auto& bwdStepMaterialInteractor =
-      bwdStepOptions.actionList.template get<MaterialInteractor>();
+      bwdStepOptions.actorList.template get<MaterialInteractor>();
   bwdStepMaterialInteractor.recordInteractions = true;
   bwdStepMaterialInteractor.multipleScattering = false;
   bwdStepMaterialInteractor.energyLoss = false;
@@ -305,7 +272,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   double bwdStepStepMaterialInX0 = 0.;
   double bwdStepStepMaterialInL0 = 0.;
 
-  if (debugModeBwdStep) {
+  if (debugMode) {
     // check if the surfaces are free
     std::cout << ">>> Backward steps to be processed sequentially ..."
               << std::endl;
@@ -318,7 +285,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   // move forward step by step through the surfaces
   sParameters = *fwdResult.endParameters;
   for (auto& bwdSteps : bwdMaterial.materialInteractions) {
-    if (debugModeBwdStep) {
+    if (debugMode) {
       std::cout << ">>> Backward step : "
                 << sParameters.referenceSurface().geometryId() << " --> "
                 << bwdSteps.surface->geometryId() << std::endl;
@@ -342,7 +309,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   // final destination surface
   const Surface& dbSurface = start.referenceSurface();
 
-  if (debugModeBwdStep) {
+  if (debugMode) {
     std::cout << ">>> Backward step : "
               << sParameters.referenceSurface().geometryId() << " --> "
               << dSurface.geometryId() << std::endl;
@@ -356,14 +323,14 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   bwdStepStepMaterialInX0 += bwdStepMaterial.materialInX0;
   bwdStepStepMaterialInL0 += bwdStepMaterial.materialInL0;
 
-  // forward-forward step compatibility test
+  // backward-backward step compatibility test
   CHECK_CLOSE_REL(bwdStepStepMaterialInX0, bwdStepMaterialInX0, 1e-3);
   CHECK_CLOSE_REL(bwdStepStepMaterialInL0, bwdStepMaterialInL0, 1e-3);
 
   // Test the material affects the covariance into the right direction
   // get the material collector and configure it
   auto& covfwdMaterialInteractor =
-      fwdOptions.actionList.template get<MaterialInteractor>();
+      fwdOptions.actorList.template get<MaterialInteractor>();
   covfwdMaterialInteractor.recordInteractions = false;
   covfwdMaterialInteractor.energyLoss = true;
   covfwdMaterialInteractor.multipleScattering = true;
@@ -372,7 +339,7 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
   const auto& covfwdResult = prop.propagate(start, fwdOptions).value();
 
   BOOST_CHECK_LE(
-      cov.determinant(),
+      start.covariance()->determinant(),
       covfwdResult.endParameters->covariance().value().determinant());
 }
 
@@ -380,26 +347,46 @@ void runTest(const propagator_t& prop, double pT, double phi, double theta,
 // - this tests the collection of surfaces
 BOOST_DATA_TEST_CASE(
     test_material_collector,
-    bdata::random((bdata::seed = 20,
-                   bdata::distribution =
-                       std::uniform_real_distribution<>(0.5_GeV, 10_GeV))) ^
-        bdata::random((bdata::seed = 21,
-                       bdata::distribution =
-                           std::uniform_real_distribution<>(-M_PI, M_PI))) ^
-        bdata::random((bdata::seed = 22,
-                       bdata::distribution =
-                           std::uniform_real_distribution<>(1.0, M_PI - 1.0))) ^
+    bdata::random((bdata::engine = std::mt19937(), bdata::seed = 20,
+                   bdata::distribution = std::uniform_real_distribution<double>(
+                       0.5_GeV, 10_GeV))) ^
         bdata::random(
-            (bdata::seed = 23,
-             bdata::distribution = std::uniform_int_distribution<>(0, 1))) ^
+            (bdata::engine = std::mt19937(), bdata::seed = 21,
+             bdata::distribution = std::uniform_real_distribution<double>(
+                 -std::numbers::pi, std::numbers::pi))) ^
         bdata::random(
-            (bdata::seed = 24,
-             bdata::distribution = std::uniform_int_distribution<>(0, 100))) ^
+            (bdata::engine = std::mt19937(), bdata::seed = 22,
+             bdata::distribution = std::uniform_real_distribution<double>(
+                 1., std::numbers::pi - 1.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 23,
+                       bdata::distribution =
+                           std::uniform_int_distribution<std::uint8_t>(0, 1))) ^
         bdata::xrange(ntests),
-    pT, phi, theta, charge, time, index) {
-  runTest(epropagator, pT, phi, theta, charge, time, index);
-  runTest(slpropagator, pT, phi, theta, charge, time, index);
+    pT, phi, theta, charge, index) {
+  if (index < skip) {
+    return;
+  }
+
+  double p = pT / sin(theta);
+  double q = -1 + 2 * charge;
+
+  // define start parameters
+  BoundSquareMatrix cov;
+  // take some major correlations (off-diagonals)
+  // clang-format off
+    cov <<
+     10_mm, 0, 0.123, 0, 0.5, 0,
+     0, 10_mm, 0, 0.162, 0, 0,
+     0.123, 0, 0.1, 0, 0, 0,
+     0, 0.162, 0, 0.1, 0, 0,
+     0.5, 0, 0, 0, 1_e / 10_GeV, 0,
+     0, 0, 0, 0, 0, 1_us;
+  // clang-format on
+  BoundTrackParameters start = BoundTrackParameters::createCurvilinear(
+      Vector4::Zero(), phi, theta, q / p, cov, ParticleHypothesis::pion());
+
+  runTest(epropagator, start);
+  runTest(slpropagator, start);
 }
 
-}  // namespace Test
-}  // namespace Acts
+}  // namespace Acts::Test

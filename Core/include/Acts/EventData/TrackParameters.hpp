@@ -1,27 +1,32 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
-#include "Acts/EventData/Charge.hpp"
-#include "Acts/EventData/SingleBoundTrackParameters.hpp"
-#include "Acts/EventData/SingleCurvilinearTrackParameters.hpp"
-#include "Acts/EventData/SingleFreeTrackParameters.hpp"
+#include "Acts/EventData/GenericBoundTrackParameters.hpp"
+#include "Acts/EventData/GenericFreeTrackParameters.hpp"
+#include "Acts/EventData/ParticleHypothesis.hpp"
 
 namespace Acts {
 
-extern template class SingleBoundTrackParameters<SinglyCharged>;
-extern template class SingleCurvilinearTrackParameters<SinglyCharged>;
-extern template class SingleFreeTrackParameters<SinglyCharged>;
+using SinglyChargedBoundTrackParameters =
+    GenericBoundTrackParameters<SinglyChargedParticleHypothesis>;
+using SinglyChargedFreeTrackParameters =
+    GenericFreeTrackParameters<SinglyChargedParticleHypothesis>;
 
-using BoundTrackParameters = SingleBoundTrackParameters<SinglyCharged>;
-using CurvilinearTrackParameters =
-    SingleCurvilinearTrackParameters<SinglyCharged>;
-using FreeTrackParameters = SingleFreeTrackParameters<SinglyCharged>;
+using NeutralBoundTrackParameters =
+    GenericBoundTrackParameters<NeutralParticleHypothesis>;
+using NeutralFreeTrackParameters =
+    GenericFreeTrackParameters<NeutralParticleHypothesis>;
+
+/// @brief BoundTrackParameters can hold any kind of charge
+using BoundTrackParameters = GenericBoundTrackParameters<ParticleHypothesis>;
+/// @brief FreeTrackParameters can hold any kind of charge
+using FreeTrackParameters = GenericFreeTrackParameters<ParticleHypothesis>;
 
 }  // namespace Acts

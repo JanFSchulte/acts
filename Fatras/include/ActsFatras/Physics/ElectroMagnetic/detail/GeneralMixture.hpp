@@ -1,20 +1,20 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include "Acts/Definitions/PdgParticle.hpp"
 #include "Acts/Material/Interactions.hpp"
-#include "Acts/Utilities/PdgParticle.hpp"
 
+#include <numbers>
 #include <random>
 
-namespace ActsFatras {
-namespace detail {
+namespace ActsFatras::detail {
 
 /// Generate scattering angles using a general mixture model.
 ///
@@ -42,7 +42,7 @@ struct GeneralMixture {
                     Particle &particle) const {
     double theta = 0.0;
 
-    if (std::abs(particle.pdg()) != Acts::PdgParticle::eElectron) {
+    if (particle.absolutePdg() != Acts::PdgParticle::eElectron) {
       //----------------------------------------------------------------------------
       // see Mixture models of multiple scattering: computation and simulation.
       // -
@@ -83,12 +83,12 @@ struct GeneralMixture {
       // for electrons we fall back to the Highland (extension)
       // return projection factor times sigma times gauss random
       const auto theta0 = Acts::computeMultipleScatteringTheta0(
-          slab, particle.pdg(), particle.mass(),
-          particle.charge() / particle.absoluteMomentum(), particle.charge());
+          slab, particle.absolutePdg(), particle.mass(), particle.qOverP(),
+          particle.absoluteCharge());
       theta = std::normal_distribution<double>(0.0, theta0)(generator);
     }
     // scale from planar to 3d angle
-    return M_SQRT2 * theta;
+    return std::numbers::sqrt2 * theta;
   }
 
   // helper methods for getting parameters and simulating
@@ -201,5 +201,4 @@ struct GeneralMixture {
   }
 };
 
-}  // namespace detail
-}  // namespace ActsFatras
+}  // namespace ActsFatras::detail

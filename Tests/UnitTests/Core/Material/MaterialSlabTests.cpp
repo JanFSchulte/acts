@@ -1,13 +1,14 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
+#include "Acts/Material/Material.hpp"
 #include "Acts/Material/MaterialSlab.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 
@@ -36,7 +37,7 @@ BOOST_AUTO_TEST_CASE(construct_compound) {
   MaterialSlab b(Material::fromMolarDensity(2., 4., 6., 8., 10.), 2.);
   MaterialSlab c(Material::fromMolarDensity(4., 8., 12., 16., 20.), 3.);
   std::vector<MaterialSlab> components = {a, b, c};
-  MaterialSlab abc(components);
+  MaterialSlab abc = MaterialSlab::combineLayers(components);
 
   // consistency checks
   CHECK_CLOSE_REL(abc.thickness() / abc.material().X0(), abc.thicknessInX0(),

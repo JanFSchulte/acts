@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -13,9 +13,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <numbers>
 
-namespace Acts {
-namespace detail {
+namespace Acts::detail {
 
 /// Traits class for an unrestricted parameter.
 struct UnrestrictedParameterTraits {
@@ -81,7 +81,7 @@ struct CyclicParameterTraits {
   /// Get the corrected value folded into the central range.
   template <typename value_t>
   static constexpr value_t getValue(const value_t& value) {
-    if ((min <= value) and (value < max)) {
+    if ((min <= value) && (value < max)) {
       return value;
     } else {
       return value - (max - min) * std::floor((value - min) / (max - min));
@@ -105,14 +105,14 @@ struct CyclicParameterTraits {
 
 // Limit types for parameter traits.
 //
-// The functions names are chosen to be consisten w/ std::numeric_limits
+// The functions names are chosen to be consistent w/ std::numeric_limits
 struct PhiBoundParameterLimits {
-  static constexpr double lowest() { return -M_PI; }
-  static constexpr double max() { return M_PI; }
+  static constexpr double lowest() { return -std::numbers::pi; }
+  static constexpr double max() { return std::numbers::pi; }
 };
 struct ThetaBoundParameterLimits {
   static constexpr double lowest() { return 0; }
-  static constexpr double max() { return M_PI; }
+  static constexpr double max() { return std::numbers::pi; }
 };
 
 // Traits implementation structs for single parameters.
@@ -131,7 +131,7 @@ struct ParameterTraitsImpl<BoundIndices, BoundIndices::eBoundTheta> {
 };
 template <BoundIndices kIndex>
 struct ParameterTraitsImpl<BoundIndices, kIndex> {
-  // other bound parameters not explicitely specified above are unrestricted
+  // other bound parameters not explicitly specified above are unrestricted
   using Type = UnrestrictedParameterTraits;
 };
 template <FreeIndices kIndex>
@@ -159,16 +159,17 @@ template <typename indices_t>
 struct ParametersTraitsImpl;
 template <>
 struct ParametersTraitsImpl<BoundIndices> {
-  static constexpr size_t kSize = static_cast<size_t>(BoundIndices::eBoundSize);
+  static constexpr std::size_t kSize =
+      static_cast<std::size_t>(BoundIndices::eBoundSize);
 };
 template <>
 struct ParametersTraitsImpl<FreeIndices> {
-  static constexpr size_t kSize = static_cast<size_t>(FreeIndices::eFreeSize);
+  static constexpr std::size_t kSize =
+      static_cast<std::size_t>(FreeIndices::eFreeSize);
 };
 
 /// The maximum parameters vector size definable for an indices enum.
 template <typename indices_t>
-constexpr size_t kParametersSize = ParametersTraitsImpl<indices_t>::kSize;
+constexpr std::size_t kParametersSize = ParametersTraitsImpl<indices_t>::kSize;
 
-}  // namespace detail
-}  // namespace Acts
+}  // namespace Acts::detail

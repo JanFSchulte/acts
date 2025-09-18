@@ -1,20 +1,23 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Geometry/GeometryContext.hpp"
-#include "Acts/Plugins/TGeo/ITGeoDetectorElementSplitter.hpp"
+#include "Acts/Plugins/Root/ITGeoDetectorElementSplitter.hpp"
 #include "Acts/Utilities/Logger.hpp"
 
 #include <map>
 #include <memory>
+#include <regex>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 class TGeoNode;
@@ -37,16 +40,17 @@ class TGeoITkModuleSplitter : public Acts::ITGeoDetectorElementSplitter {
     // Map the nodes name to the splitting parameters
     std::map<std::string, unsigned int> barrelMap = {};
     std::map<std::string, std::vector<SplitRange>> discMap = {};
+    std::map<std::string, std::string> splitPatterns;
   };
 
   /// Constructor
   ///
   /// @param cfg the configuration struct
   /// @param logger the logging object
-  TGeoITkModuleSplitter(const Config& cfg,
-                        std::unique_ptr<const Acts::Logger> logger =
-                            Acts::getDefaultLogger("TGeoITkModuleSplitter",
-                                                   Acts::Logging::INFO));
+  explicit TGeoITkModuleSplitter(
+      const Config& cfg,
+      std::unique_ptr<const Acts::Logger> logger =
+          Acts::getDefaultLogger("TGeoITkModuleSplitter", Acts::Logging::INFO));
 
   ~TGeoITkModuleSplitter() override = default;
 
@@ -65,6 +69,13 @@ class TGeoITkModuleSplitter : public Acts::ITGeoDetectorElementSplitter {
       const override;
 
  private:
+  /// Categorise module split patterns as barrel or disc module splits
+  ///
+  /// Mark the split pattern as either barrel or disc module split
+  /// depending on whether the split category is found in the
+  /// barrel or disc map, and compile the regular expression.
+  void initSplitCategories();
+
   /// Take a geometry context and TGeoElement in the Itk barrel region
   /// and split it into sub elements.
   ///
@@ -98,6 +109,9 @@ class TGeoITkModuleSplitter : public Acts::ITGeoDetectorElementSplitter {
 
   /// Contains the splitting parameters, sorted by sensor type
   Config m_cfg;
+
+  /// regular expressions to match sensors for barrel or disk module splits
+  std::vector<std::tuple<std::regex, std::string, bool>> m_splitCategories;
 
   /// Private access to the logger
   const Acts::Logger& logger() const { return *m_logger; }

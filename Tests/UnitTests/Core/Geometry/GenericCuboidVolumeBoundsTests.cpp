@@ -1,28 +1,36 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Definitions/Direction.hpp"
 #include "Acts/Geometry/GenericCuboidVolumeBounds.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Surfaces/PlanarBounds.hpp"
+#include "Acts/Surfaces/PlaneSurface.hpp"
 #include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Surfaces/SurfaceBounds.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
+#include "Acts/Utilities/BoundingBox.hpp"
+#include "Acts/Utilities/Helpers.hpp"
+#include "Acts/Visualization/IVisualization3D.hpp"
 #include "Acts/Visualization/PlyVisualization3D.hpp"
 
-#include <chrono>
+#include <array>
+#include <cmath>
 #include <fstream>
-#include <iostream>
 #include <memory>
+#include <numbers>
+#include <utility>
+#include <vector>
 
-namespace Acts {
-namespace Test {
+namespace Acts::Test {
 
 GeometryContext gctx = GeometryContext();
 
@@ -75,9 +83,9 @@ BOOST_AUTO_TEST_CASE(GenericCuboidBoundsOrientedSurfaces) {
 
   auto surfaces = cubo.orientedSurfaces(Transform3::Identity());
   for (const auto& srf : surfaces) {
-    auto pbounds = dynamic_cast<const PlanarBounds*>(&srf.first->bounds());
+    auto pbounds = dynamic_cast<const PlanarBounds*>(&srf.surface->bounds());
     for (const auto& vtx : pbounds->vertices()) {
-      Vector3 glob = srf.first->localToGlobal(gctx, vtx, {});
+      Vector3 glob = srf.surface->localToGlobal(gctx, vtx, {});
       // check if glob is in actual vertex list
       BOOST_CHECK(is_in(glob, vertices));
     }
@@ -95,9 +103,9 @@ BOOST_AUTO_TEST_CASE(GenericCuboidBoundsOrientedSurfaces) {
 
   surfaces = cubo.orientedSurfaces(Transform3::Identity());
   for (const auto& srf : surfaces) {
-    auto pbounds = dynamic_cast<const PlanarBounds*>(&srf.first->bounds());
+    auto pbounds = dynamic_cast<const PlanarBounds*>(&srf.surface->bounds());
     for (const auto& vtx : pbounds->vertices()) {
-      Vector3 glob = srf.first->localToGlobal(gctx, vtx, {});
+      Vector3 glob = srf.surface->localToGlobal(gctx, vtx, {});
       // check if glob is in actual vertex list
       BOOST_CHECK(is_in(glob, vertices));
     }
@@ -105,13 +113,13 @@ BOOST_AUTO_TEST_CASE(GenericCuboidBoundsOrientedSurfaces) {
 
   Transform3 trf;
   trf = Translation3(Vector3(0, 8, -5)) *
-        AngleAxis3(M_PI / 3., Vector3(1, -3, 9).normalized());
+        AngleAxis3(std::numbers::pi / 3., Vector3(1, -3, 9).normalized());
 
   surfaces = cubo.orientedSurfaces(trf);
   for (const auto& srf : surfaces) {
-    auto pbounds = dynamic_cast<const PlanarBounds*>(&srf.first->bounds());
+    auto pbounds = dynamic_cast<const PlanarBounds*>(&srf.surface->bounds());
     for (const auto& vtx : pbounds->vertices()) {
-      Vector3 glob = srf.first->localToGlobal(gctx, vtx, {});
+      Vector3 glob = srf.surface->localToGlobal(gctx, vtx, {});
       // check if glob is in actual vertex list
       BOOST_CHECK(is_in(trf.inverse() * glob, vertices));
     }
@@ -153,7 +161,7 @@ BOOST_AUTO_TEST_CASE(bounding_box_creation) {
   auto bb = gcvb.boundingBox();
 
   Transform3 rot;
-  rot = AngleAxis3(M_PI / 2., Vector3::UnitX());
+  rot = AngleAxis3(std::numbers::pi / 2., Vector3::UnitX());
 
   BOOST_CHECK_EQUAL(bb.entity(), nullptr);
   BOOST_CHECK_EQUAL(bb.max(), Vector3(2, 1, 1));
@@ -165,16 +173,35 @@ BOOST_AUTO_TEST_CASE(bounding_box_creation) {
   CHECK_CLOSE_ABS(bb.max(), Vector3(2, 0, 1), tol);
   BOOST_CHECK_EQUAL(bb.min(), Vector3(0, -1, 0));
 
-  rot = AngleAxis3(M_PI / 2., Vector3::UnitZ());
+  rot = AngleAxis3(std::numbers::pi / 2., Vector3::UnitZ());
   bb = gcvb.boundingBox(&rot);
   BOOST_CHECK_EQUAL(bb.entity(), nullptr);
   CHECK_CLOSE_ABS(bb.max(), Vector3(0, 2, 1), tol);
   CHECK_CLOSE_ABS(bb.min(), Vector3(-1, 0., 0.), tol);
 
   rot = AngleAxis3(0.542, Vector3::UnitZ()) *
-        AngleAxis3(M_PI / 5., Vector3(1, 3, 6).normalized());
+        AngleAxis3(std::numbers::pi / 5., Vector3(1, 3, 6).normalized());
 
   bb = gcvb.boundingBox(&rot);
+  BOOST_CHECK_EQUAL(bb.entity(), nullptr);
+  CHECK_CLOSE_ABS(bb.max(), Vector3(1.00976, 2.26918, 1.11988), tol);
+  CHECK_CLOSE_ABS(bb.min(), Vector3(-0.871397, 0, -0.0867708), tol);
+
+  // Check recreation from bound values
+  const auto boundValues = gcvb.values();
+  BOOST_CHECK_EQUAL(boundValues.size(), 24u);
+
+  auto bValueArrray =
+      toArray<GenericCuboidVolumeBounds::BoundValues::eSize, double>(
+          boundValues);
+  GenericCuboidVolumeBounds gcvbCopy(bValueArrray);
+  BOOST_CHECK_EQUAL(gcvbCopy.values().size(), 24u);
+
+  // Redo the check from above
+  rot = AngleAxis3(0.542, Vector3::UnitZ()) *
+        AngleAxis3(std::numbers::pi / 5., Vector3(1, 3, 6).normalized());
+
+  bb = gcvbCopy.boundingBox(&rot);
   BOOST_CHECK_EQUAL(bb.entity(), nullptr);
   CHECK_CLOSE_ABS(bb.max(), Vector3(1.00976, 2.26918, 1.11988), tol);
   CHECK_CLOSE_ABS(bb.min(), Vector3(-0.871397, 0, -0.0867708), tol);
@@ -198,17 +225,19 @@ BOOST_AUTO_TEST_CASE(GenericCuboidVolumeBoundarySurfaces) {
 
   for (auto& os : gcvbOrientedSurfaces) {
     auto geoCtx = GeometryContext();
-    auto osCenter = os.first->center(geoCtx);
-    auto osNormal = os.first->normal(geoCtx);
-    double nDir = (double)os.second;
+    auto osCenter = os.surface->center(geoCtx);
+    const auto* pSurface =
+        dynamic_cast<const Acts::PlaneSurface*>(os.surface.get());
+    BOOST_REQUIRE_MESSAGE(pSurface != nullptr,
+                          "The surface is not a plane surface");
+    auto osNormal = pSurface->normal(geoCtx);
     // Check if you step inside the volume with the oriented normal
-    auto insideGcvb = osCenter + nDir * osNormal;
-    auto outsideGcvb = osCenter - nDir * osNormal;
+    Vector3 insideGcvb = osCenter + os.direction * osNormal;
+    Vector3 outsideGcvb = osCenter - os.direction * osNormal;
     BOOST_CHECK(cubo.inside(insideGcvb));
     BOOST_CHECK(!cubo.inside(outsideGcvb));
   }
 }
 
 BOOST_AUTO_TEST_SUITE_END()
-}  // namespace Test
-}  // namespace Acts
+}  // namespace Acts::Test

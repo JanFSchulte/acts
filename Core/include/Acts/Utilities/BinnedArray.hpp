@@ -1,16 +1,13 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-///////////////////////////////////////////////////////////////////
-// BinnedArray.h, Acts project
-///////////////////////////////////////////////////////////////////
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
+
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Utilities/BinUtility.hpp"
 
@@ -23,7 +20,7 @@ namespace Acts {
 ///
 /// Pure virtual base class for Binned Array to avoid map searches
 /// - there is only one restriction:
-///   T must be of pointer type in order to be initialized withh nullptr
+///   T must be of pointer type in order to be initialized with nullptr
 ///   and to allow for nullptr return type
 ///
 /// - the BinnedArray is designed for 0D, 1D, 2D, and 3D binning
@@ -41,15 +38,15 @@ class BinnedArray {
   ///
   /// @return the object according to the estimated bin
   virtual T object(const Vector2& lposition,
-                   std::array<size_t, 3>& bins) const = 0;
+                   std::array<std::size_t, 3>& bins) const = 0;
 
   /// Same method without bins for backward compatibility
   ///
-  /// @param lposition is the local position for finding the obect
+  /// @param lposition is the local position for finding the object
   ///
   /// @return the object according to the estimated bin
   virtual T object(const Vector2& lposition) const {
-    std::array<size_t, 3> bins{};
+    std::array<std::size_t, 3> bins{};
     return object(lposition, bins);
   }
 
@@ -60,7 +57,7 @@ class BinnedArray {
   ///
   /// @return the object according to the estimated bin
   virtual T object(const Vector3& position,
-                   std::array<size_t, 3>& bin) const = 0;
+                   std::array<std::size_t, 3>& bin) const = 0;
 
   /// Same method without bins for backward compatibility
   ///
@@ -68,11 +65,11 @@ class BinnedArray {
   ///
   /// @return the object according to the estimated bin
   virtual T object(const Vector3& position) const {
-    std::array<size_t, 3> bins{};
+    std::array<std::size_t, 3> bins{};
     return object(position, bins);
   }
 
-  /// Return all unqiue object
+  /// Return all unique object
   /// @note this is the accessor to the
   /// @return the vector of all array objects
   virtual const std::vector<T>& arrayObjects() const = 0;

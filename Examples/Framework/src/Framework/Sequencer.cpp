@@ -1,158 +1,224 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Framework/Sequencer.hpp"
 
+#include "Acts/Plugins/FpeMonitoring/FpeMonitor.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "Acts/Utilities/Table.hpp"
+#include "Acts/Utilities/Zip.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
+#include "ActsExamples/Framework/DataHandle.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
+#include "ActsExamples/Framework/IContextDecorator.hpp"
+#include "ActsExamples/Framework/IReader.hpp"
+#include "ActsExamples/Framework/IWriter.hpp"
 #include "ActsExamples/Framework/ProcessCode.hpp"
+#include "ActsExamples/Framework/SequenceElement.hpp"
 #include "ActsExamples/Framework/WhiteBoard.hpp"
 #include "ActsExamples/Utilities/Paths.hpp"
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
-#include <exception>
+#include <cstdlib>
+#include <format>
+#include <fstream>
+#include <functional>
+#include <iterator>
+#include <limits>
 #include <numeric>
+#include <ostream>
+#include <ratio>
 #include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <typeinfo>
 
-#ifndef ACTS_EXAMPLES_NO_TBB
 #include <TROOT.h>
-#endif
+#include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/stacktrace/stacktrace.hpp>
 
-#include <dfe/dfe_io_dsv.hpp>
-#include <dfe/dfe_namedtuple.hpp>
+namespace ActsExamples {
 
-ActsExamples::Sequencer::Sequencer(const Sequencer::Config& cfg)
+namespace {
+
+// Saturated addition that does not overflow and exceed
+// std::numeric_limits<std::size_t>::max().
+//
+// From http://locklessinc.com/articles/sat_arithmetic/
+std::size_t saturatedAdd(std::size_t a, std::size_t b) {
+  std::size_t res = a + b;
+  res |= -static_cast<int>(res < a);
+  return res;
+}
+
+}  // namespace
+
+Sequencer::Sequencer(const Sequencer::Config& cfg)
     : m_cfg(cfg),
       m_taskArena((m_cfg.numThreads < 0) ? tbb::task_arena::automatic
                                          : m_cfg.numThreads),
       m_logger(Acts::getDefaultLogger("Sequencer", m_cfg.logLevel)) {
-#ifndef ACTS_EXAMPLES_NO_TBB
+  if (m_cfg.numThreads < -1 || m_cfg.numThreads == 0) {
+    ACTS_ERROR("Number of threads must be -1 (automatic) or positive");
+    throw std::invalid_argument(
+        "Number of threads must be -1 (automatic) or positive");
+  }
+
   if (m_cfg.numThreads == 1) {
-#endif
     ACTS_INFO("Create Sequencer (single-threaded)");
-#ifndef ACTS_EXAMPLES_NO_TBB
   } else {
     ROOT::EnableThreadSafety();
     ACTS_INFO("Create Sequencer with " << m_cfg.numThreads << " threads");
   }
-#endif
-}
 
-void ActsExamples::Sequencer::addService(std::shared_ptr<IService> service) {
-  if (not service) {
-    throw std::invalid_argument("Can not add empty/NULL service");
+  const char* envvar = std::getenv("ACTS_SEQUENCER_DISABLE_FPEMON");
+  if (envvar != nullptr) {
+    ACTS_INFO(
+        "Overriding FPE tracking Sequencer based on environment variable "
+        "ACTS_SEQUENCER_DISABLE_FPEMON");
+    m_cfg.trackFpes = false;
   }
-  m_services.push_back(std::move(service));
-  ACTS_INFO("Added service '" << m_services.back()->name() << "'");
+
+  if (m_cfg.trackFpes && !m_cfg.fpeMasks.empty() &&
+      !Acts::FpeMonitor::canSymbolize()) {
+    ACTS_ERROR("FPE monitoring is enabled but symbolization is not available");
+    throw std::runtime_error(
+        "FPE monitoring is enabled but symbolization is not available");
+  }
 }
 
-void ActsExamples::Sequencer::addContextDecorator(
+void Sequencer::addContextDecorator(
     std::shared_ptr<IContextDecorator> decorator) {
-  if (not decorator) {
+  if (!decorator) {
     throw std::invalid_argument("Can not add empty/NULL context decorator");
   }
   m_decorators.push_back(std::move(decorator));
-  ACTS_INFO("Added context decarator '" << m_decorators.back()->name() << "'");
+  ACTS_INFO("Added context decorator '" << m_decorators.back()->name() << "'");
 }
 
-void ActsExamples::Sequencer::addReader(std::shared_ptr<IReader> reader) {
-  if (not reader) {
+void Sequencer::addReader(std::shared_ptr<IReader> reader) {
+  if (!reader) {
     throw std::invalid_argument("Can not add empty/NULL reader");
   }
-  m_readers.push_back(std::move(reader));
-  ACTS_INFO("Added reader '" << m_readers.back()->name() << "'");
+  m_readers.push_back(reader);
+  addElement(std::move(reader));
 }
 
-void ActsExamples::Sequencer::addAlgorithm(
-    std::shared_ptr<IAlgorithm> algorithm) {
-  if (not algorithm) {
+void Sequencer::addAlgorithm(std::shared_ptr<IAlgorithm> algorithm) {
+  if (!algorithm) {
     throw std::invalid_argument("Can not add empty/NULL algorithm");
   }
-  m_algorithms.push_back(std::move(algorithm));
-  ACTS_INFO("Added algorithm '" << m_algorithms.back()->name() << "'");
+
+  addElement(std::move(algorithm));
 }
 
-void ActsExamples::Sequencer::addWriter(std::shared_ptr<IWriter> writer) {
-  if (not writer) {
+void Sequencer::addWriter(std::shared_ptr<IWriter> writer) {
+  if (!writer) {
     throw std::invalid_argument("Can not add empty/NULL writer");
   }
-  m_writers.push_back(std::move(writer));
-  ACTS_INFO("Added writer '" << m_writers.back()->name() << "'");
+  m_writers.push_back(writer);
+  addElement(std::move(writer));
 }
 
-void ActsExamples::Sequencer::addWhiteboardAlias(
-    const std::string& aliasName, const std::string& objectName) {
-  auto [it, success] =
-      m_whiteboardObjectAliases.insert({objectName, aliasName});
-  if (!success) {
-    throw std::invalid_argument("Alias to '" + objectName + "' already set");
+void Sequencer::addElement(const std::shared_ptr<SequenceElement>& element) {
+  if (!element) {
+    throw std::invalid_argument("Can not add empty/NULL element");
+  }
+
+  m_sequenceElements.push_back({element});
+
+  ACTS_INFO("Add " << element->typeName() << " '" << element->name() << "'");
+
+  bool valid = true;
+
+  for (const auto* handle : element->readHandles()) {
+    handle->emulate(m_whiteBoardState, m_whiteboardObjectAliases, *m_logger);
+  }
+
+  if (valid) {  // only record outputs this if we're valid until here
+    for (const auto* handle : element->writeHandles()) {
+      handle->emulate(m_whiteBoardState, m_whiteboardObjectAliases, *m_logger);
+    }
   }
 }
 
-std::vector<std::string> ActsExamples::Sequencer::listAlgorithmNames() const {
+void Sequencer::addWhiteboardAlias(const std::string& aliasName,
+                                   const std::string& objectName) {
+  const auto range = m_whiteboardObjectAliases.equal_range(objectName);
+  for (auto it = range.first; it != range.second; ++it) {
+    const auto& [key, value] = *it;
+    if (value == aliasName) {
+      ACTS_INFO("Key '" << objectName << "' aliased to '" << aliasName
+                        << "' already set");
+      return;
+    }
+  }
+
+  m_whiteboardObjectAliases.insert({objectName, aliasName});
+
+  auto oit = m_whiteBoardState.find(objectName);
+  if (oit == m_whiteBoardState.end()) {
+    ACTS_ERROR("Key '" << objectName << "' does not exist");
+    return;
+  }
+
+  ACTS_INFO("Key '" << objectName << "' aliased to '" << aliasName << "'");
+  m_whiteBoardState[aliasName] = oit->second;
+}
+
+std::vector<std::string> Sequencer::listAlgorithmNames() const {
   std::vector<std::string> names;
 
   // WARNING this must be done in the same order as in the processing
-  for (const auto& service : m_services) {
-    names.push_back("Service:" + service->name());
-  }
   for (const auto& decorator : m_decorators) {
     names.push_back("Decorator:" + decorator->name());
   }
-  for (const auto& reader : m_readers) {
-    names.push_back("Reader:" + reader->name());
-  }
-  for (const auto& algorithm : m_algorithms) {
-    names.push_back("Algorithm:" + algorithm->name());
-  }
-  for (const auto& writer : m_writers) {
-    names.push_back("Writer:" + writer->name());
+  for (const auto& [algorithm, fpe] : m_sequenceElements) {
+    names.push_back(std::string(algorithm->typeName()) + ":" +
+                    algorithm->name());
   }
 
   return names;
 }
 
-namespace {
-// Saturated addition that does not overflow and exceed SIZE_MAX.
-//
-// From http://locklessinc.com/articles/sat_arithmetic/
-size_t saturatedAdd(size_t a, size_t b) {
-  size_t res = a + b;
-  res |= -static_cast<int>(res < a);
-  return res;
-}
-}  // namespace
-
-std::pair<std::size_t, std::size_t>
-ActsExamples::Sequencer::determineEventsRange() const {
-  constexpr auto kInvalidEventsRange = std::make_pair(SIZE_MAX, SIZE_MAX);
+std::pair<std::size_t, std::size_t> Sequencer::determineEventsRange() const {
+  constexpr auto kInvalidEventsRange =
+      std::make_pair(std::numeric_limits<std::size_t>::max(),
+                     std::numeric_limits<std::size_t>::max());
 
   // Note on skipping events:
   //
-  // Previously, skipping events was only allowed when readers where available,
-  // since only readers had a `.skip()` functionality. The `.skip()` interface
-  // has been removed in favour of telling the readers the event they are
-  // requested to read via the algorithm context.
-  // Skipping can now also be used when no readers are configured, e.g. for
-  // generating only a few specific events in a simulation setup.
+  // Previously, skipping events was only allowed when readers where
+  // available, since only readers had a `.skip()` functionality. The
+  // `.skip()` interface has been removed in favour of telling the readers the
+  // event they are requested to read via the algorithm context. Skipping can
+  // now also be used when no readers are configured, e.g. for generating only
+  // a few specific events in a simulation setup.
 
   // determine intersection of event ranges available from readers
-  size_t beg = 0u;
-  size_t end = SIZE_MAX;
+  std::size_t beg = 0u;
+  std::size_t end = std::numeric_limits<std::size_t>::max();
   for (const auto& reader : m_readers) {
     auto available = reader->availableEvents();
     beg = std::max(beg, available.first);
     end = std::min(end, available.second);
   }
 
-  // since we use event ranges (and not just num events) they might not overlap
+  // since we use event ranges (and not just num events) they might not
+  // overlap
   if (end < beg) {
-    ACTS_ERROR("Available events ranges from readers do not overlap");
+    ACTS_ERROR("Available events ranges from readers do not overlap (beg="
+               << beg << ", end=" << end << ")");
     return kInvalidEventsRange;
   }
   // configured readers without available events makes no sense
@@ -167,7 +233,8 @@ ActsExamples::Sequencer::determineEventsRange() const {
     return kInvalidEventsRange;
   }
   // events range was not defined by either the readers or user command line.
-  if ((beg == 0u) and (end == SIZE_MAX) and (!m_cfg.events.has_value())) {
+  if ((beg == 0u) && (end == std::numeric_limits<std::size_t>::max()) &&
+      (!m_cfg.events.has_value())) {
     ACTS_ERROR("Could not determine number of events");
     return kInvalidEventsRange;
   }
@@ -199,7 +266,7 @@ struct StopWatch {
   Timepoint start;
   Duration& store;
 
-  StopWatch(Duration& s) : start(Clock::now()), store(s) {}
+  explicit StopWatch(Duration& s) : start(Clock::now()), store(s) {}
   ~StopWatch() { store += Clock::now() - start; }
 };
 
@@ -220,35 +287,87 @@ inline std::string asString(D duration) {
 
 // Convert duration scaled to one event to a printable string.
 template <typename D>
-inline std::string perEvent(D duration, size_t numEvents) {
+inline std::string perEvent(D duration, std::size_t numEvents) {
+  if (numEvents == 0) {
+    return "undef/event";
+  }
   return asString(duration / numEvents) + "/event";
 }
-
-// Store timing data
-struct TimingInfo {
-  std::string identifier;
-  double time_total_s = 0;
-  double time_perevent_s = 0;
-
-  DFE_NAMEDTUPLE(TimingInfo, identifier, time_total_s, time_perevent_s);
-};
 
 void storeTiming(const std::vector<std::string>& identifiers,
                  const std::vector<Duration>& durations, std::size_t numEvents,
                  const std::string& path) {
-  dfe::NamedTupleTsvWriter<TimingInfo> writer(path, 4);
-  for (size_t i = 0; i < identifiers.size(); ++i) {
-    TimingInfo info;
-    info.identifier = identifiers[i];
-    info.time_total_s =
+  std::ofstream file(path);
+
+  file << "identifier,time_total_s,time_perevent_s\n";
+
+  for (std::size_t i = 0; i < identifiers.size(); ++i) {
+    const auto time_total_s =
         std::chrono::duration_cast<Seconds>(durations[i]).count();
-    info.time_perevent_s = info.time_total_s / numEvents;
-    writer.append(info);
+    file << identifiers[i] << "," << time_total_s << ","
+         << time_total_s / numEvents << "\n";
   }
+  file << "\n";
+}
+
+// Convert duration to milliseconds
+double durationToMs(Duration duration) {
+  double ns = std::chrono::duration_cast<NanoSeconds>(duration).count();
+  return ns / 1e6;
+}
+
+void printTiming(const std::vector<std::string>& identifiers,
+                 const std::vector<Duration>& durations, std::size_t numEvents,
+                 const Acts::Logger& logger) {
+  if (identifiers.empty() || durations.empty()) {
+    return;
+  }
+
+  Acts::Table table;
+  using enum Acts::Table::Alignment;
+  table.addColumn("Algorithm", "{}", Left);
+  table.addColumn("Total Time (ms)", "{:.2f}", Right);
+  table.addColumn("Time/Event (ms)", "{:.2f}", Right);
+  table.addColumn("Fraction", "{:.1f}%", Right);
+
+  Duration totalTime =
+      std::accumulate(durations.begin(), durations.end(), Duration::zero());
+
+  // Create sorted indices based on total duration (descending)
+  std::vector<std::size_t> sortedIndices(identifiers.size());
+  std::iota(sortedIndices.begin(), sortedIndices.end(), 0);
+  std::sort(sortedIndices.begin(), sortedIndices.end(),
+            [&](std::size_t a, std::size_t b) {
+              return durations[a] > durations[b];
+            });
+
+  for (std::size_t idx : sortedIndices) {
+    double fraction =
+        totalTime > Duration::zero()
+            ? 100.0 *
+                  std::chrono::duration_cast<NanoSeconds>(durations[idx])
+                      .count() /
+                  std::chrono::duration_cast<NanoSeconds>(totalTime).count()
+            : 0.0;
+
+    double totalValue = durationToMs(durations[idx]);
+    double perEventValue =
+        numEvents > 0 ? durationToMs(durations[idx]) / numEvents : 0.0;
+
+    table.addRow(identifiers[idx], totalValue, perEventValue, fraction);
+  }
+
+  // Add summary row
+  double totalSummaryValue = durationToMs(totalTime);
+  double totalPerEventValue =
+      numEvents > 0 ? durationToMs(totalTime) / numEvents : 0.0;
+  table.addRow("TOTAL", totalSummaryValue, totalPerEventValue, 100.0);
+
+  ACTS_INFO("Timing breakdown:\n" << table);
 }
 }  // namespace
 
-int ActsExamples::Sequencer::run() {
+int Sequencer::run() {
   // measure overall wall clock
   Timepoint clockWallStart = Clock::now();
   // per-algorithm time measures
@@ -258,64 +377,100 @@ int ActsExamples::Sequencer::run() {
 
   // processing only works w/ a well-known number of events
   // error message is already handled by the helper function
-  std::pair<size_t, size_t> eventsRange = determineEventsRange();
-  if ((eventsRange.first == SIZE_MAX) and (eventsRange.second == SIZE_MAX)) {
+  std::pair<std::size_t, std::size_t> eventsRange = determineEventsRange();
+  if ((eventsRange.first == std::numeric_limits<std::size_t>::max()) &&
+      (eventsRange.second == std::numeric_limits<std::size_t>::max())) {
     return EXIT_FAILURE;
   }
 
   ACTS_INFO("Processing events [" << eventsRange.first << ", "
                                   << eventsRange.second << ")");
   ACTS_INFO("Starting event loop with " << m_cfg.numThreads << " threads");
-  ACTS_INFO("  " << m_services.size() << " services");
   ACTS_INFO("  " << m_decorators.size() << " context decorators");
-  ACTS_INFO("  " << m_readers.size() << " readers");
-  ACTS_INFO("  " << m_algorithms.size() << " algorithms");
-  ACTS_INFO("  " << m_writers.size() << " writers");
+  ACTS_INFO("  " << m_sequenceElements.size() << " sequence elements");
 
-  // run start-of-run hooks
-  for (auto& service : m_services) {
-    names.push_back("Service:" + service->name() + ":startRun");
-    clocksAlgorithms.push_back(Duration::zero());
-    StopWatch sw(clocksAlgorithms.back());
-    service->startRun();
+  std::size_t nWriters = 0;
+  std::size_t nReaders = 0;
+  std::size_t nAlgorithms = 0;
+  for (const auto& [alg, fpe] : m_sequenceElements) {
+    if (dynamic_cast<const IWriter*>(alg.get()) != nullptr) {
+      nWriters++;
+    } else if (dynamic_cast<const IReader*>(alg.get()) != nullptr) {
+      nReaders++;
+    } else if (dynamic_cast<const IAlgorithm*>(alg.get()) != nullptr) {
+      nAlgorithms++;
+    } else {
+      throw std::runtime_error{"Unknown sequence element type"};
+    }
   }
 
-  ACTS_VERBOSE("Initialize algorithms");
-  for (auto& alg : m_algorithms) {
-    ACTS_VERBOSE("Initialize algorithm: " << alg->name());
-    if (alg->initialize() != ProcessCode::SUCCESS) {
-      ACTS_FATAL("Failed to initialize algorithm: " << alg->name());
+  ACTS_INFO("  " << nReaders << " readers");
+  ACTS_INFO("  " << nAlgorithms << " algorithms");
+  ACTS_INFO("  " << nWriters << " writers");
+
+  ACTS_VERBOSE("Initialize sequence elements");
+  for (auto& [alg, fpe] : m_sequenceElements) {
+    ACTS_VERBOSE("Initialize " << alg->typeName() << ": " << alg->name());
+    try {
+      if (alg->initialize() != ProcessCode::SUCCESS) {
+        throw std::runtime_error("Failed to process event data");
+      }
+    } catch (const std::exception& e) {
+      ACTS_FATAL("Failed to initialize " << alg->typeName() << " \""
+                                         << alg->name() << "\"" << e.what());
+      throw;
+    }
+  }
+
+  // Inform readers that we're going to start from a specific event number
+  for (const auto& reader : m_readers) {
+    if (reader->skip(eventsRange.first) != ProcessCode::SUCCESS) {
       throw std::runtime_error("Failed to process event data");
     }
   }
 
   // execute the parallel event loop
-  std::atomic<size_t> nProcessedEvents = 0;
-  size_t nTotalEvents = eventsRange.second - eventsRange.first;
+  std::atomic<std::size_t> nProcessedEvents = 0;
+  std::size_t nTotalEvents = eventsRange.second - eventsRange.first;
+
+  std::atomic<std::size_t> nextThreadId = 0;
+  tbb::enumerable_thread_specific<std::size_t> threadIds{
+      [&nextThreadId]() { return nextThreadId++; }};
+
+  std::atomic<std::size_t> nextEvent = eventsRange.first;
+
   m_taskArena.execute([&] {
     tbbWrap::parallel_for(
-        tbb::blocked_range<size_t>(eventsRange.first, eventsRange.second),
-        [&](const tbb::blocked_range<size_t>& r) {
+        tbb::blocked_range<std::size_t>(eventsRange.first, eventsRange.second),
+        [&](const tbb::blocked_range<std::size_t>& r) {
           std::vector<Duration> localClocksAlgorithms(names.size(),
                                                       Duration::zero());
+          std::size_t threadId = threadIds.local();
 
-          for (size_t event = r.begin(); event != r.end(); ++event) {
+          for (std::size_t n = r.begin(); n != r.end(); ++n) {
+            ACTS_VERBOSE("Thread about to pick next event");
+
+            for (const auto& writer : m_writers) {
+              if (writer->beginEvent(threadId) != ProcessCode::SUCCESS) {
+                throw std::runtime_error("Failed to process event data");
+              }
+            }
+
+            std::size_t event = nextEvent++;
+
+            ACTS_DEBUG("start processing event " << event << " on thread "
+                                                 << threadId);
             m_cfg.iterationCallback();
             // Use per-event store
             WhiteBoard eventStore(
                 Acts::getDefaultLogger("EventStore#" + std::to_string(event),
                                        m_cfg.logLevel),
                 m_whiteboardObjectAliases);
-            // If we ever wanted to run algorithms in parallel, this needs to be
-            // changed to Algorithm context copies
-            AlgorithmContext context(0, event, eventStore);
-            size_t ialgo = 0;
+            // If we ever wanted to run algorithms in parallel, this needs to
+            // be changed to Algorithm context copies
+            AlgorithmContext context(0, event, eventStore, threadId);
+            std::size_t ialgo = 0;
 
-            // Prepare event store w/ service information
-            for (auto& service : m_services) {
-              StopWatch sw(localClocksAlgorithms[ialgo++]);
-              service->prepare(++context);
-            }
             /// Decorate the context
             for (auto& cdr : m_decorators) {
               StopWatch sw(localClocksAlgorithms[ialgo++]);
@@ -325,89 +480,218 @@ int ActsExamples::Sequencer::run() {
               }
             }
 
-            ACTS_VERBOSE("Execute readers");
-            for (auto& rdr : m_readers) {
-              StopWatch sw(localClocksAlgorithms[ialgo++]);
-              ACTS_VERBOSE("Execute reader: " << rdr->name());
-              if (rdr->read(++context) != ProcessCode::SUCCESS) {
-                throw std::runtime_error("Failed to read input data");
-              }
-            }
+            ACTS_VERBOSE("Execute sequence elements");
 
-            ACTS_VERBOSE("Execute algorithms");
-            for (auto& alg : m_algorithms) {
-              StopWatch sw(localClocksAlgorithms[ialgo++]);
-              ACTS_VERBOSE("Execute algorithm: " << alg->name());
-              if (alg->execute(++context) != ProcessCode::SUCCESS) {
-                ACTS_FATAL("Failed to execute algorithm: " << alg->name());
-                throw std::runtime_error("Failed to process event data");
+            for (auto& [alg, fpe] : m_sequenceElements) {
+              std::optional<Acts::FpeMonitor> mon;
+              if (m_cfg.trackFpes) {
+                mon.emplace();
+                context.fpeMonitor = &mon.value();
               }
-            }
+              StopWatch sw(localClocksAlgorithms[ialgo++]);
+              ACTS_VERBOSE("Execute " << alg->typeName() << ": "
+                                      << alg->name());
+              try {
+                if (alg->internalExecute(++context) != ProcessCode::SUCCESS) {
+                  throw std::runtime_error("Failed to process event data");
+                }
+              } catch (const std::exception& e) {
+                ACTS_FATAL("Failed to execute " << alg->typeName() << " \""
+                                                << alg->name()
+                                                << "\": " << e.what());
+                throw;
+              }
+              ACTS_VERBOSE("Completed " << alg->typeName() << ": "
+                                        << alg->name());
 
-            ACTS_VERBOSE("Execute writers");
-            for (auto& wrt : m_writers) {
-              StopWatch sw(localClocksAlgorithms[ialgo++]);
-              ACTS_VERBOSE("Execute writer: " << wrt->name());
-              if (wrt->write(++context) != ProcessCode::SUCCESS) {
-                throw std::runtime_error("Failed to write output data");
+              if (mon) {
+                auto& local = fpe.local();
+
+                for (const auto& [count, type, st] :
+                     mon->result().stackTraces()) {
+                  auto [maskLoc, nMasked] = fpeMaskCount(*st, type);
+                  if (nMasked < count) {
+                    std::stringstream ss;
+                    ss << "FPE of type " << type
+                       << " exceeded configured per-event threshold of "
+                       << nMasked << " (mask: " << maskLoc
+                       << ") (seen: " << count << " FPEs)\n"
+                       << Acts::FpeMonitor::stackTraceToString(
+                              *st, m_cfg.fpeStackTraceLength);
+
+                    m_nUnmaskedFpe += (count - nMasked);
+
+                    if (m_cfg.failOnFirstFpe) {
+                      ACTS_ERROR(ss.str());
+                      local.merge(mon->result());  // merge so we get correct
+                                                   // results after throwing
+                      throw FpeFailure{ss.str()};
+                    } else if (!local.contains(type, *st)) {
+                      ACTS_INFO(ss.str());
+                    }
+                  }
+                }
+
+                local.merge(mon->result());
               }
+              context.fpeMonitor = nullptr;
             }
 
             nProcessedEvents++;
-            if (nTotalEvents <= 100) {
+            if (logger().level() <= Acts::Logging::DEBUG) {
+              ACTS_DEBUG("finished event " << event);
+            } else if (nTotalEvents <= 100) {
               ACTS_INFO("finished event " << event);
-            } else {
-              if (nProcessedEvents % 100 == 0) {
-                ACTS_INFO(nProcessedEvents << " / " << nTotalEvents
-                                           << " events processed");
-              }
+            } else if (nProcessedEvents % 100 == 0) {
+              ACTS_INFO(nProcessedEvents << " / " << nTotalEvents
+                                         << " events processed");
             }
           }
 
           // add timing info to global information
           {
             tbbWrap::queuing_mutex::scoped_lock lock(clocksAlgorithmsMutex);
-            for (size_t i = 0; i < clocksAlgorithms.size(); ++i) {
+            for (std::size_t i = 0; i < clocksAlgorithms.size(); ++i) {
               clocksAlgorithms[i] += localClocksAlgorithms[i];
             }
           }
         });
   });
 
-  ACTS_VERBOSE("Finalize algorithms");
-  for (auto& alg : m_algorithms) {
-    ACTS_VERBOSE("Finalize algorithm: " << alg->name());
-    if (alg->finalize() != ProcessCode::SUCCESS) {
-      ACTS_FATAL("Failed to finalize algorithm: " << alg->name());
-      throw std::runtime_error("Failed to process event data");
+  ACTS_VERBOSE("Finalize sequence elements");
+  for (auto& [alg, fpe] : m_sequenceElements) {
+    ACTS_VERBOSE("Finalize " << alg->typeName() << ": " << alg->name());
+    try {
+      if (alg->finalize() != ProcessCode::SUCCESS) {
+        throw std::runtime_error("Failed to process event data");
+      }
+    } catch (const std::exception& e) {
+      ACTS_FATAL("Failed to finalize " << alg->typeName() << " \""
+                                       << alg->name() << "\"" << e.what());
+      throw;
     }
   }
 
-  // run end-of-run hooks
-  for (auto& wrt : m_writers) {
-    names.push_back("Writer:" + wrt->name() + ":endRun");
-    clocksAlgorithms.push_back(Duration::zero());
-    StopWatch sw(clocksAlgorithms.back());
-    if (wrt->endRun() != ProcessCode::SUCCESS) {
-      return EXIT_FAILURE;
-    }
-  }
+  fpeReport();
 
   // summarize timing
   Duration totalWall = Clock::now() - clockWallStart;
   Duration totalReal = std::accumulate(
       clocksAlgorithms.begin(), clocksAlgorithms.end(), Duration::zero());
-  size_t numEvents = eventsRange.second - eventsRange.first;
+  std::size_t numEvents = eventsRange.second - eventsRange.first;
   ACTS_INFO("Processed " << numEvents << " events in " << asString(totalWall)
                          << " (wall clock)");
   ACTS_INFO("Average time per event: " << perEvent(totalReal, numEvents));
   ACTS_DEBUG("Average time per algorithm:");
-  for (size_t i = 0; i < names.size(); ++i) {
+  for (std::size_t i = 0; i < names.size(); ++i) {
     ACTS_DEBUG("  " << names[i] << ": "
                     << perEvent(clocksAlgorithms[i], numEvents));
   }
-  storeTiming(names, clocksAlgorithms, numEvents,
-              joinPaths(m_cfg.outputDir, m_cfg.outputTimingFile));
+
+  printTiming(names, clocksAlgorithms, numEvents, logger());
+
+  if (!m_cfg.outputDir.empty()) {
+    storeTiming(names, clocksAlgorithms, numEvents,
+                joinPaths(m_cfg.outputDir, m_cfg.outputTimingFile));
+  }
+
+  if (m_nUnmaskedFpe > 0) {
+    return EXIT_FAILURE;
+  }
 
   return EXIT_SUCCESS;
 }
+
+void Sequencer::fpeReport() const {
+  if (!m_cfg.trackFpes) {
+    return;
+  }
+
+  for (auto& [alg, fpe] : m_sequenceElements) {
+    auto merged = std::accumulate(
+        fpe.begin(), fpe.end(), Acts::FpeMonitor::Result{},
+        [](const auto& lhs, const auto& rhs) { return lhs.merged(rhs); });
+    if (!merged.hasStackTraces()) {
+      // no FPEs to report
+      continue;
+    }
+    ACTS_INFO("-----------------------------------");
+    ACTS_INFO("FPE summary for " << alg->typeName() << ": " << alg->name());
+    ACTS_INFO("-----------------------------------");
+
+    std::vector<std::reference_wrapper<const Acts::FpeMonitor::Result::FpeInfo>>
+        sorted;
+    std::transform(merged.stackTraces().begin(), merged.stackTraces().end(),
+                   std::back_inserter(sorted),
+                   [](const auto& f) -> const auto& { return f; });
+    std::ranges::sort(sorted, std::greater{},
+                      [](const auto& s) { return s.get().count; });
+
+    std::vector<std::reference_wrapper<const Acts::FpeMonitor::Result::FpeInfo>>
+        remaining;
+
+    for (const auto& el : sorted) {
+      const auto& [count, type, st] = el.get();
+      auto [maskLoc, nMasked] = fpeMaskCount(*st, type);
+      ACTS_INFO("- " << type << ": (" << count << " times) "
+                     << (nMasked > 0 ? "[MASKED: " + std::to_string(nMasked) +
+                                           " per event by " + maskLoc + "]"
+                                     : "")
+                     << "\n"
+                     << Acts::FpeMonitor::stackTraceToString(
+                            *st, m_cfg.fpeStackTraceLength));
+    }
+  }
+
+  if (m_nUnmaskedFpe > 0) {
+    ACTS_ERROR("Encountered " << m_nUnmaskedFpe << " unmasked FPEs");
+  } else {
+    ACTS_INFO("No unmasked FPEs encountered");
+  }
+}
+
+std::pair<std::string, std::size_t> Sequencer::fpeMaskCount(
+    const boost::stacktrace::stacktrace& st, Acts::FpeType type) const {
+  for (const auto& frame : st) {
+    std::string loc = Acts::FpeMonitor::getSourceLocation(frame);
+    auto it = loc.find_last_of(':');
+    std::string locFile = loc.substr(0, it);
+    unsigned int locLine = std::stoi(loc.substr(it + 1));
+    for (const auto& [file, lines, fType, count] : m_cfg.fpeMasks) {
+      const auto [start, end] = lines;
+      if (boost::algorithm::ends_with(locFile, file) &&
+          (start <= locLine && locLine < end) && fType == type) {
+        std::string ls = start + 1 == end ? std::to_string(start)
+                                          : "(" + std::to_string(start) + ", " +
+                                                std::to_string(end) + "]";
+        return {file + ":" + ls, count};
+      }
+    }
+  }
+  return {"NONE", 0};
+}
+
+Acts::FpeMonitor::Result Sequencer::fpeResult() const {
+  Acts::FpeMonitor::Result merged;
+  for (auto& [alg, fpe] : m_sequenceElements) {
+    merged.merge(std::accumulate(
+        fpe.begin(), fpe.end(), Acts::FpeMonitor::Result{},
+        [](const auto& lhs, const auto& rhs) { return lhs.merged(rhs); }));
+  }
+  return merged;
+}
+
+std::ostream& operator<<(std::ostream& os,
+                         const ActsExamples::Sequencer::FpeMask& m) {
+  os << "FpeMask(" << m.file << ":";
+
+  if (m.lines.first + 1 == m.lines.second) {
+    os << m.lines.first;
+  } else {
+    os << "(" << m.lines.first << ", " << m.lines.second << "]";
+  }
+  os << ", " << m.type << " <= " << m.count << ")";
+  return os;
+}
+
+}  // namespace ActsExamples

@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -17,8 +17,7 @@
 
 #include <unordered_map>
 
-namespace Acts {
-namespace detail {
+namespace Acts::detail {
 
 /// Calculate the global track parameters covariance for a smoothed trajectory
 /// stored in MultiTrajecty based on formulas at Journal of Physics: Conference
@@ -34,20 +33,20 @@ namespace detail {
 /// @return The global track parameters covariance matrix and the starting
 /// row/column for smoothed states
 template <typename traj_t, typename parameters_t = BoundTrackParameters>
-std::pair<ActsDynamicMatrix, std::unordered_map<size_t, size_t>>
-globalTrackParametersCovariance(const Acts::MultiTrajectory<traj_t>& multiTraj,
-                                const size_t& entryIndex) {
+std::pair<ActsDynamicMatrix, std::unordered_map<std::size_t, std::size_t>>
+globalTrackParametersCovariance(const traj_t& multiTraj,
+                                const std::size_t& entryIndex) {
   using CovMatrix = typename parameters_t::CovarianceMatrix;
   using GainMatrix = CovMatrix;
 
   // The last smoothed state index
-  size_t lastSmoothedIndex = SIZE_MAX;
+  std::size_t lastSmoothedIndex = Acts::MultiTrajectoryTraits::kInvalid;
   // The total number of smoothed states
-  size_t nSmoothedStates = 0;
+  std::size_t nSmoothedStates = 0;
   // Visit all the states
   multiTraj.visitBackwards(entryIndex, [&](const auto& ts) {
     if (ts.hasSmoothed()) {
-      if (lastSmoothedIndex == SIZE_MAX) {
+      if (lastSmoothedIndex == Acts::MultiTrajectoryTraits::kInvalid) {
         lastSmoothedIndex = ts.index();
       }
       nSmoothedStates++;
@@ -60,13 +59,13 @@ globalTrackParametersCovariance(const Acts::MultiTrajectory<traj_t>& multiTraj,
   fullGlobalTrackParamsCov.setZero();
   // The index of state within the trajectory and the starting row/column for
   // this state in the global covariance matrix
-  std::unordered_map<size_t, size_t> stateRowIndices;
+  std::unordered_map<std::size_t, std::size_t> stateRowIndices;
   // Visit the smoothed states to calculate the full global track parameters
   // covariance
-  size_t nProcessed = 0;
+  std::size_t nProcessed = 0;
   auto prev_ts = multiTraj.getTrackState(lastSmoothedIndex);
   multiTraj.visitBackwards(lastSmoothedIndex, [&](const auto& ts) {
-    const size_t iRow =
+    const std::size_t iRow =
         fullGlobalTrackParamsCov.rows() - eBoundSize * (nProcessed + 1);
     // Fill the covariance of this state
     fullGlobalTrackParamsCov.block<eBoundSize, eBoundSize>(iRow, iRow) =
@@ -79,8 +78,8 @@ globalTrackParametersCovariance(const Acts::MultiTrajectory<traj_t>& multiTraj,
       GainMatrix G = ts.filteredCovariance() * prev_ts.jacobian().transpose() *
                      prev_ts.predictedCovariance().inverse();
       // Loop over the beforehand smoothed states
-      for (size_t iProcessed = 1; iProcessed <= nProcessed; iProcessed++) {
-        const size_t iCol = iRow + eBoundSize * iProcessed;
+      for (std::size_t iProcessed = 1; iProcessed <= nProcessed; iProcessed++) {
+        const std::size_t iCol = iRow + eBoundSize * iProcessed;
         CovMatrix prev_correlation =
             fullGlobalTrackParamsCov.block<eBoundSize, eBoundSize>(
                 iRow + eBoundSize, iCol);
@@ -96,8 +95,7 @@ globalTrackParametersCovariance(const Acts::MultiTrajectory<traj_t>& multiTraj,
     prev_ts = ts;
   });
 
-  return std::make_pair(fullGlobalTrackParamsCov, stateRowIndices);
+  return {fullGlobalTrackParamsCov, stateRowIndices};
 }
 
-}  // namespace detail
-}  // namespace Acts
+}  // namespace Acts::detail

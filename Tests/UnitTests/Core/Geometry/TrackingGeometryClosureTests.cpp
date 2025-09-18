@@ -1,25 +1,35 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Units.hpp"
+#include "Acts/Geometry/ApproachDescriptor.hpp"
+#include "Acts/Geometry/BoundarySurfaceT.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
-#include "Acts/Utilities/Helpers.hpp"
+#include "Acts/Geometry/GeometryIdentifier.hpp"
+#include "Acts/Geometry/Layer.hpp"
+#include "Acts/Geometry/TrackingGeometry.hpp"
+#include "Acts/Geometry/TrackingVolume.hpp"
+#include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Surfaces/SurfaceArray.hpp"
+#include "Acts/Utilities/BinnedArray.hpp"
 
+#include <cstddef>
+#include <memory>
 #include <unordered_map>
+#include <vector>
 
 #include "TrackingVolumeCreation.hpp"
 
 using namespace Acts::UnitLiterals;
 
-namespace Acts {
-namespace Test {
+namespace Acts::Test {
 
 // Create a test context
 GeometryContext tgContext = GeometryContext();
@@ -117,20 +127,18 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test) {
       // layers start are counted from 1 - n
       GeometryIdentifier::Value layer_id = 0;
       for (const auto& lay : vol.confinedLayers()->arrayObjects()) {
-        // check the layer volume id and layer layer id
+        // check the layer volume id and layer id
         auto lay_vol_id = lay->geometryId().volume();
         auto lay_lay_id = lay->geometryId().layer();
         BOOST_CHECK_EQUAL(++layer_id, lay_lay_id);
         BOOST_CHECK_EQUAL(geoid, lay_vol_id);
         // test the layer approach surfaces
         if (lay->approachDescriptor() != nullptr) {
-          // approach surfacesare counted from 1 - n
+          // approach surfaces are counted from 1 - n
           GeometryIdentifier::Value asurface_id = 0;
           for (const auto& asf :
                lay->approachDescriptor()->containedSurfaces()) {
-            // check the approach volume id, approach layer id, approach
-            // approach
-            // id
+            // check the approach volume id, approach layer id
             auto asf_vol_id = asf->geometryId().volume();
             auto asf_lay_id = asf->geometryId().layer();
             auto asf_asf_id = asf->geometryId().approach();
@@ -146,9 +154,7 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test) {
           // sensitive surfaces are counted from 1 - n
           GeometryIdentifier::Value ssurface_id = 0;
           for (const auto& ssf : lay->surfaceArray()->surfaces()) {
-            // check the approach volume id, approach layer id, approach
-            // approach
-            // id
+            // check the approach volume id, approach layer id
             auto ssf_vol_id = ssf->geometryId().volume();
             auto ssf_lay_id = ssf->geometryId().layer();
             auto ssf_ssf_id = ssf->geometryId().sensitive();
@@ -184,16 +190,29 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test) {
   check_vol(*ioVolumes[1], 5);
 }
 
+template <typename Callable>
+struct CallableHook : public Acts::GeometryIdentifierHook {
+  Callable callable;
+
+  explicit CallableHook(const Callable& c) : callable(c) {}
+
+  Acts::GeometryIdentifier decorateIdentifier(
+      Acts::GeometryIdentifier identifier,
+      const Acts::Surface& surface) const override {
+    return callable(identifier, surface);
+  }
+};
+
 BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test_extra) {
-  size_t extra = 0;
-  std::unordered_map<const Surface*, size_t> extraMap;
+  std::size_t extra = 0;
+  std::unordered_map<const Surface*, std::size_t> extraMap;
   auto hookImpl = [&](GeometryIdentifier orig, const Surface& srf) {
     ++extra;
     extraMap[&srf] = extra;
-    orig.setExtra(extra);
-    return orig;
+    return orig.withExtra(extra);
   };
-  GeometryIdentifierHook hook{hookImpl};
+  CallableHook<decltype(hookImpl)> hook{hookImpl};
+
   TrackingGeometry tGeometry = makeTrackingGeometry(hook);
   auto world = tGeometry.highestTrackingVolume();
 
@@ -220,7 +239,7 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test_extra) {
       // layers start are counted from 1 - n
       GeometryIdentifier::Value layer_id = 0;
       for (const auto& lay : vol.confinedLayers()->arrayObjects()) {
-        // check the layer volume id and layer layer id
+        // check the layer volume id and layer id
         auto lay_vol_id = lay->geometryId().volume();
         auto lay_lay_id = lay->geometryId().layer();
         BOOST_CHECK_EQUAL(++layer_id, lay_lay_id);
@@ -231,9 +250,7 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test_extra) {
           GeometryIdentifier::Value asurface_id = 0;
           for (const auto& asf :
                lay->approachDescriptor()->containedSurfaces()) {
-            // check the approach volume id, approach layer id, approach
-            // approach
-            // id
+            // check the approach volume id, approach layer id
             auto asf_vol_id = asf->geometryId().volume();
             auto asf_lay_id = asf->geometryId().layer();
             auto asf_asf_id = asf->geometryId().approach();
@@ -249,9 +266,7 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test_extra) {
           // sensitive surfaces are counted from 1 - n
           GeometryIdentifier::Value ssurface_id = 0;
           for (const auto& ssf : lay->surfaceArray()->surfaces()) {
-            // check the approach volume id, approach layer id, approach
-            // approach
-            // id
+            // check the approach volume id, approach layer id
             auto ssf_vol_id = ssf->geometryId().volume();
             auto ssf_lay_id = ssf->geometryId().layer();
             auto ssf_ssf_id = ssf->geometryId().sensitive();
@@ -289,16 +304,46 @@ BOOST_AUTO_TEST_CASE(GeometryIdentifier_closeGeometry_test_extra) {
 
 BOOST_AUTO_TEST_CASE(TrackingGeometry_testVisitSurfaces) {
   GeometryIdentifierHook hook{};
-  TrackingGeometry tGeometry = makeTrackingGeometry(hook);
+  auto tGeometry = makeTrackingGeometry(hook);
 
-  // this will also cover TrackingVolume::visitSurfaces
-  // its a pretty bare bones test, and only asserts that the
-  // method is called on the expected number of surfaces
-  size_t nSurfaces = 0;
+  // Test visitSurfaces
+  std::size_t nSurfaces = 0;
   tGeometry.visitSurfaces([&nSurfaces](const auto*) { nSurfaces++; });
-
   BOOST_CHECK_EQUAL(nSurfaces, 9u);
+
+  // Test visitVolumes
+  std::size_t nVolumes = 0;
+  tGeometry.visitVolumes([&nVolumes](const auto*) { nVolumes++; });
+  BOOST_CHECK_EQUAL(nVolumes,
+                    5u);  // World + Inner + InnerInner + InnerOuter + Outer
+
+  // Test apply with mutable visitor
+  bool volumeCalled = false;
+  tGeometry.apply([&](TrackingVolume& /*volume*/) { volumeCalled = true; });
+  BOOST_CHECK(volumeCalled);
+
+  // Test apply with const visitor
+  bool constVolumeCalled = false;
+  tGeometry.apply(
+      [&](const TrackingVolume& /*volume*/) { constVolumeCalled = true; });
+  BOOST_CHECK(constVolumeCalled);
+
+  // Test apply with overloaded visitor
+  bool surfaceCalled = false;
+  bool portalCalled = false;
+  tGeometry.apply(overloaded{
+      [&](Surface& /*surface*/) { surfaceCalled = true; },
+      [&](Portal& /*portal*/) { portalCalled = true; },
+      [&](TrackingVolume& /*volume*/) {},
+  });
+  BOOST_CHECK(surfaceCalled);
+  // Gen 1 geometry
+  BOOST_CHECK(!portalCalled);
+
+  // Test apply with lambda visitor
+  bool lambdaVolumeCalled = false;
+  tGeometry.apply([&](Volume& /*volume*/) { lambdaVolumeCalled = true; });
+  BOOST_CHECK(lambdaVolumeCalled);
 }
 
-}  //  end of namespace Test
-}  //  end of namespace Acts
+}  // namespace Acts::Test

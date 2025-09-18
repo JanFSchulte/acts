@@ -1,19 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Material/detail/AverageMaterials.hpp"
 
 #include "Acts/Material/Material.hpp"
 
+#include <cmath>
+
 Acts::MaterialSlab Acts::detail::combineSlabs(const MaterialSlab& slab1,
                                               const MaterialSlab& slab2) {
+  return combineSlabs(slab1, slab2.material(), slab2.thickness());
+}
+
+Acts::MaterialSlab Acts::detail::combineSlabs(const MaterialSlab& slab1,
+                                              const Material& material2,
+                                              float thickness2_) {
   const auto& mat1 = slab1.material();
-  const auto& mat2 = slab2.material();
+  const auto& mat2 = material2;
 
   // NOTE 2020-08-26 msmk
   // the following computations provide purely geometrical averages of the
@@ -27,41 +35,49 @@ Acts::MaterialSlab Acts::detail::combineSlabs(const MaterialSlab& slab1,
   // to properly account for the energy loss in multiple material.
 
   // use double for (intermediate) computations to avoid precision loss
+  const double thickness1 = static_cast<double>(slab1.thickness());
+  const double thickness2 = static_cast<double>(thickness2_);
+
+  if (thickness1 == 0) {
+    return MaterialSlab(material2, thickness2_);
+  }
+  if (thickness2 == 0) {
+    return slab1;
+  }
 
   // the thickness properties are purely additive
-  double thickness = static_cast<double>(slab1.thickness()) +
-                     static_cast<double>(slab2.thickness());
+  const double thickness = thickness1 + thickness2;
 
-  // if the two materials are the same there is not need for aditional
+  // if the two materials are the same there is no need for additional
   // computation
   if (mat1 == mat2) {
     return {mat1, static_cast<float>(thickness)};
   }
 
-  double thicknessInX0 = static_cast<double>(slab1.thicknessInX0()) +
-                         static_cast<double>(slab2.thicknessInX0());
-  double thicknessInL0 = static_cast<double>(slab1.thicknessInL0()) +
-                         static_cast<double>(slab2.thicknessInL0());
-
-  // radiation/interaction length follows from consistency argument
-  float x0 = thickness / thicknessInX0;
-  float l0 = thickness / thicknessInL0;
-
   // molar amount-of-substance assuming a unit area, i.e. volume = thickness*1*1
-  double molarAmount1 = static_cast<double>(mat1.molarDensity()) *
-                        static_cast<double>(slab1.thickness());
-  double molarAmount2 = static_cast<double>(mat2.molarDensity()) *
-                        static_cast<double>(slab2.thickness());
-  double molarAmount = molarAmount1 + molarAmount2;
+  const double molarDensity1 = static_cast<double>(mat1.molarDensity());
+  const double molarDensity2 = static_cast<double>(mat2.molarDensity());
+
+  const double molarAmount1 = molarDensity1 * thickness1;
+  const double molarAmount2 = molarDensity2 * thickness2;
+  const double molarAmount = molarAmount1 + molarAmount2;
 
   // handle vacuum specially
-  if (not(0.0 < molarAmount)) {
-    return {Material(), static_cast<float>(thickness)};
+  if (molarAmount <= 0) {
+    return {Material::Vacuum(), static_cast<float>(thickness)};
   }
 
-  // compute average molar density by divding the total amount-of-substance by
-  // the total volume for the same unit area, i.e. volume = totalThickness*1*1
-  float molarDensity = molarAmount / thickness;
+  // radiation/interaction length follows from consistency argument
+  const double thicknessX01 = static_cast<double>(slab1.thicknessInX0());
+  const double thicknessX02 = thickness2 / static_cast<double>(mat2.X0());
+  const double thicknessL01 = static_cast<double>(slab1.thicknessInL0());
+  const double thicknessL02 = thickness2 / static_cast<double>(mat2.L0());
+
+  const double thicknessInX0 = thicknessX01 + thicknessX02;
+  const double thicknessInL0 = thicknessL01 + thicknessL02;
+
+  const float x0 = static_cast<float>(thickness / thicknessInX0);
+  const float l0 = static_cast<float>(thickness / thicknessInL0);
 
   // assume two slabs of materials with N1,N2 atoms/molecules each with atomic
   // masses A1,A2 and nuclear charges. We have a total of N = N1 + N2
@@ -70,7 +86,7 @@ Acts::MaterialSlab Acts::detail::combineSlabs(const MaterialSlab& slab1,
   //
   //     A = (N1*A1 + N2*A2) / (N1+N2) = (N1/N)*A1 + (N2/N)*A2 = W1*A1 + W2*A2
   //
-  // the number of atoms/molecues in a given volume V with molar density rho is
+  // the number of atoms/molecules in a given volume V with molar density rho is
   //
   //     N = V * rho * Na
   //
@@ -80,10 +96,12 @@ Acts::MaterialSlab Acts::detail::combineSlabs(const MaterialSlab& slab1,
   //        = (Vi*rhoi) / (V1*rho1 + V2*rho2)
   //
   // which can be computed from the molar amount-of-substance above.
+  const double ar1 = static_cast<double>(mat1.Ar());
+  const double ar2 = static_cast<double>(mat2.Ar());
 
-  double molarWeight1 = molarAmount1 / molarAmount;
-  double molarWeight2 = molarAmount2 / molarAmount;
-  float ar = molarWeight1 * mat1.Ar() + molarWeight2 * mat2.Ar();
+  const double molarWeight1 = molarAmount1 / molarAmount;
+  const double molarWeight2 = molarAmount2 / molarAmount;
+  const float ar = static_cast<float>(molarWeight1 * ar1 + molarWeight2 * ar2);
 
   // In the case of the atomic number, its main use is the computation
   // of the mean excitation energy approximated in ATL-SOFT-PUB-2008-003 as :
@@ -91,24 +109,50 @@ Acts::MaterialSlab Acts::detail::combineSlabs(const MaterialSlab& slab1,
   // This mean excitation energy will then be used to compute energy loss
   // which will be proportional to :
   //     Eloss ~ ln(1/I)*thickness
-  // In the case of two sucessive material :
+  // In the case of two successive material :
   //     Eloss = El1 + El2
   //           ~ ln(Z1)*t1 + ln(Z2)*t2
   //           ~ ln(Z)*t
   // To respect this the average atomic number thus need to be defined as :
   //     ln(Z)*t = ln(Z1)*t1 + ln(Z2)*t2
   //           Z = Exp( ln(Z1)*t1/t + ln(Z2)*t2/t )
+  const double z1 = static_cast<double>(mat1.Z());
+  const double z2 = static_cast<double>(mat2.Z());
 
-  double thicknessWeight1 = slab1.thickness() / thickness;
-  double thicknessWeight2 = slab2.thickness() / thickness;
-  float z = 0;
-  if (mat1.Z() != 0 && mat2.Z() != 0) {
-    z = exp(thicknessWeight1 * log(mat1.Z()) +
-            thicknessWeight2 * log(mat2.Z()));
+  const double thicknessWeight1 = thickness1 / thickness;
+  const double thicknessWeight2 = thickness2 / thickness;
+  float z = 0.f;
+  if (z1 > 0. && z2 > 0.) {
+    z = static_cast<float>(std::exp(thicknessWeight1 * std::log(z1) +
+                                    thicknessWeight2 * std::log(z2)));
   } else {
-    z = thicknessWeight1 * mat1.Z() + thicknessWeight2 * mat2.Z();
+    z = static_cast<float>(thicknessWeight1 * z1 + thicknessWeight2 * z2);
   }
 
-  return {Material::fromMolarDensity(x0, l0, ar, z, molarDensity),
-          static_cast<float>(thickness)};
+  // compute average molar density by dividing the total amount-of-substance by
+  // the total volume for the same unit area, i.e. volume = totalThickness*1*1
+  const float molarDensity = static_cast<float>(molarAmount / thickness);
+
+  const double molarElectronAmount1 = mat1.molarElectronDensity() * thickness1;
+  const double molarElectronAmount2 = mat2.molarElectronDensity() * thickness2;
+  const double molarElectronAmount =
+      molarElectronAmount1 + molarElectronAmount2;
+  const float molarElectronDensity =
+      static_cast<float>(molarElectronAmount / thickness);
+
+  float meanExcitationEnergy = 0.f;
+  if (mat1.meanExcitationEnergy() > 0 && mat2.meanExcitationEnergy() > 0) {
+    meanExcitationEnergy = static_cast<float>(
+        std::exp(thicknessWeight1 * std::log(mat1.meanExcitationEnergy())) *
+        std::exp(thicknessWeight2 * std::log(mat2.meanExcitationEnergy())));
+  } else {
+    meanExcitationEnergy =
+        static_cast<float>(thicknessWeight1 * mat1.meanExcitationEnergy() +
+                           thicknessWeight2 * mat2.meanExcitationEnergy());
+  }
+
+  return {
+      Material::fromMolarDensity(x0, l0, ar, z, molarDensity,
+                                 molarElectronDensity, meanExcitationEnergy),
+      static_cast<float>(thickness)};
 }

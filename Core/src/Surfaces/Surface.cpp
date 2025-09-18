@@ -1,63 +1,77 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Surfaces/Surface.hpp"
 
-#include "Acts/EventData/detail/TransformationBoundToFree.hpp"
+#include "Acts/Definitions/Common.hpp"
+#include "Acts/Surfaces/SurfaceBounds.hpp"
 #include "Acts/Surfaces/detail/AlignmentHelper.hpp"
+#include "Acts/Utilities/JacobianHelpers.hpp"
+#include "Acts/Visualization/ViewConfig.hpp"
 
 #include <iomanip>
-#include <iostream>
 #include <utility>
 
-Acts::Surface::Surface(const Transform3& transform)
-    : GeometryObject(), m_transform(transform) {}
+namespace Acts {
 
-Acts::Surface::Surface(const DetectorElementBase& detelement)
+Surface::Surface(const Transform3& transform)
+    : GeometryObject(), m_transform(std::make_unique<Transform3>(transform)) {}
+
+Surface::Surface(const DetectorElementBase& detelement)
     : GeometryObject(), m_associatedDetElement(&detelement) {}
 
-Acts::Surface::Surface(const Surface& other)
+Surface::Surface(const Surface& other)
     : GeometryObject(other),
       std::enable_shared_from_this<Surface>(),
-      m_transform(other.m_transform),
-      m_surfaceMaterial(other.m_surfaceMaterial) {}
-
-Acts::Surface::Surface(const GeometryContext& gctx, const Surface& other,
-                       const Transform3& shift)
-    : GeometryObject(),
-      m_transform(shift * other.transform(gctx)),
-      m_surfaceMaterial(other.m_surfaceMaterial) {}
-
-Acts::Surface::~Surface() = default;
-
-bool Acts::Surface::isOnSurface(const GeometryContext& gctx,
-                                const Vector3& position,
-                                const Vector3& momentum,
-                                const BoundaryCheck& bcheck) const {
-  // global to local transformation
-  auto lpResult = globalToLocal(gctx, position, momentum);
-  if (lpResult.ok()) {
-    return bcheck ? bounds().inside(lpResult.value(), bcheck) : true;
+      m_associatedDetElement(other.m_associatedDetElement),
+      m_surfaceMaterial(other.m_surfaceMaterial) {
+  if (other.m_transform) {
+    m_transform = std::make_unique<Transform3>(*other.m_transform);
   }
-  return false;
 }
 
-Acts::AlignmentToBoundMatrix Acts::Surface::alignmentToBoundDerivative(
-    const GeometryContext& gctx, const FreeVector& parameters,
-    const FreeVector& pathDerivative) const {
+Surface::Surface(const GeometryContext& gctx, const Surface& other,
+                 const Transform3& shift)
+    : GeometryObject(),
+      m_transform(std::make_unique<Transform3>(shift * other.transform(gctx))),
+      m_surfaceMaterial(other.m_surfaceMaterial) {}
+
+Surface::~Surface() noexcept = default;
+
+std::ostream& operator<<(std::ostream& os, Surface::SurfaceType type) {
+  return os << Surface::s_surfaceTypeNames[static_cast<std::size_t>(type)];
+}
+
+bool Surface::isOnSurface(const GeometryContext& gctx, const Vector3& position,
+                          const Vector3& direction,
+                          const BoundaryTolerance& boundaryTolerance,
+                          double tolerance) const {
+  // global to local transformation
+  auto lpResult = globalToLocal(gctx, position, direction, tolerance);
+  if (!lpResult.ok()) {
+    return false;
+  }
+  return bounds().inside(lpResult.value(), boundaryTolerance);
+}
+
+AlignmentToBoundMatrix Surface::alignmentToBoundDerivative(
+    const GeometryContext& gctx, const Vector3& position,
+    const Vector3& direction, const FreeVector& pathDerivative) const {
+  assert(isOnSurface(gctx, position, direction, BoundaryTolerance::Infinite()));
+
   // 1) Calculate the derivative of bound parameter local position w.r.t.
   // alignment parameters without path length correction
   const auto alignToBoundWithoutCorrection =
-      alignmentToBoundDerivativeWithoutCorrection(gctx, parameters);
+      alignmentToBoundDerivativeWithoutCorrection(gctx, position, direction);
   // 2) Calculate the derivative of path length w.r.t. alignment parameters
-  const auto alignToPath = alignmentToPathDerivative(gctx, parameters);
+  const auto alignToPath = alignmentToPathDerivative(gctx, position, direction);
   // 3) Calculate the jacobian from free parameters to bound parameters
-  FreeToBoundMatrix jacToLocal = freeToBoundJacobian(gctx, parameters);
+  FreeToBoundMatrix jacToLocal = freeToBoundJacobian(gctx, position, direction);
   // 4) The derivative of bound parameters w.r.t. alignment
   // parameters is alignToBoundWithoutCorrection +
   // jacToLocal*pathDerivative*alignToPath
@@ -67,11 +81,12 @@ Acts::AlignmentToBoundMatrix Acts::Surface::alignmentToBoundDerivative(
   return alignToBound;
 }
 
-Acts::AlignmentToBoundMatrix
-Acts::Surface::alignmentToBoundDerivativeWithoutCorrection(
-    const GeometryContext& gctx, const FreeVector& parameters) const {
-  // The global posiiton
-  const auto position = parameters.segment<3>(eFreePos0);
+AlignmentToBoundMatrix Surface::alignmentToBoundDerivativeWithoutCorrection(
+    const GeometryContext& gctx, const Vector3& position,
+    const Vector3& direction) const {
+  (void)direction;
+  assert(isOnSurface(gctx, position, direction, BoundaryTolerance::Infinite()));
+
   // The vector between position and center
   const auto pcRowVec = (position - center(gctx)).transpose().eval();
   // The local frame rotation
@@ -107,12 +122,11 @@ Acts::Surface::alignmentToBoundDerivativeWithoutCorrection(
   return alignToBound;
 }
 
-Acts::AlignmentToPathMatrix Acts::Surface::alignmentToPathDerivative(
-    const GeometryContext& gctx, const FreeVector& parameters) const {
-  // The global posiiton
-  const auto position = parameters.segment<3>(eFreePos0);
-  // The direction
-  const auto direction = parameters.segment<3>(eFreeDir0);
+AlignmentToPathMatrix Surface::alignmentToPathDerivative(
+    const GeometryContext& gctx, const Vector3& position,
+    const Vector3& direction) const {
+  assert(isOnSurface(gctx, position, direction, BoundaryTolerance::Infinite()));
+
   // The vector between position and center
   const auto pcRowVec = (position - center(gctx)).transpose().eval();
   // The local frame rotation
@@ -134,19 +148,23 @@ Acts::AlignmentToPathMatrix Acts::Surface::alignmentToPathDerivative(
   return alignToPath;
 }
 
-std::shared_ptr<Acts::Surface> Acts::Surface::getSharedPtr() {
+std::shared_ptr<Surface> Surface::getSharedPtr() {
   return shared_from_this();
 }
 
-std::shared_ptr<const Acts::Surface> Acts::Surface::getSharedPtr() const {
+std::shared_ptr<const Surface> Surface::getSharedPtr() const {
   return shared_from_this();
 }
 
-Acts::Surface& Acts::Surface::operator=(const Surface& other) {
+Surface& Surface::operator=(const Surface& other) {
   if (&other != this) {
     GeometryObject::operator=(other);
     // detector element, identifier & layer association are unique
-    m_transform = other.m_transform;
+    if (other.m_transform) {
+      m_transform = std::make_unique<Transform3>(*other.m_transform);
+    } else {
+      m_transform.reset();
+    }
     m_associatedLayer = other.m_associatedLayer;
     m_surfaceMaterial = other.m_surfaceMaterial;
     m_associatedDetElement = other.m_associatedDetElement;
@@ -154,7 +172,7 @@ Acts::Surface& Acts::Surface::operator=(const Surface& other) {
   return *this;
 }
 
-bool Acts::Surface::operator==(const Surface& other) const {
+bool Surface::operator==(const Surface& other) const {
   // (a) fast exit for pointer comparison
   if (&other == this) {
     return true;
@@ -172,7 +190,8 @@ bool Acts::Surface::operator==(const Surface& other) const {
     return false;
   }
   // (e) compare transform values
-  if (!m_transform.isApprox(other.m_transform, 1e-9)) {
+  if (m_transform && other.m_transform &&
+      !m_transform->isApprox((*other.m_transform), 1e-9)) {
     return false;
   }
   // (f) compare material
@@ -184,19 +203,18 @@ bool Acts::Surface::operator==(const Surface& other) const {
   return true;
 }
 
-// overload dump for stream operator
-std::ostream& Acts::Surface::toStream(const GeometryContext& gctx,
-                                      std::ostream& sl) const {
+std::ostream& Surface::toStreamImpl(const GeometryContext& gctx,
+                                    std::ostream& sl) const {
   sl << std::setiosflags(std::ios::fixed);
   sl << std::setprecision(4);
   sl << name() << std::endl;
   const Vector3& sfcenter = center(gctx);
   sl << "     Center position  (x, y, z) = (" << sfcenter.x() << ", "
      << sfcenter.y() << ", " << sfcenter.z() << ")" << std::endl;
-  Acts::RotationMatrix3 rot(transform(gctx).matrix().block<3, 3>(0, 0));
-  Acts::Vector3 rotX(rot.col(0));
-  Acts::Vector3 rotY(rot.col(1));
-  Acts::Vector3 rotZ(rot.col(2));
+  RotationMatrix3 rot(transform(gctx).matrix().block<3, 3>(0, 0));
+  Vector3 rotX(rot.col(0));
+  Vector3 rotY(rot.col(1));
+  Vector3 rotZ(rot.col(2));
   sl << std::setprecision(6);
   sl << "     Rotation:             colX = (" << rotX(0) << ", " << rotX(1)
      << ", " << rotX(2) << ")" << std::endl;
@@ -209,54 +227,53 @@ std::ostream& Acts::Surface::toStream(const GeometryContext& gctx,
   return sl;
 }
 
-bool Acts::Surface::operator!=(const Acts::Surface& sf) const {
-  return !(operator==(sf));
+std::string Surface::toString(const GeometryContext& gctx) const {
+  std::stringstream ss;
+  ss << toStream(gctx);
+  return ss.str();
 }
 
-Acts::Vector3 Acts::Surface::center(const GeometryContext& gctx) const {
-  // fast access via tranform matrix (and not translation())
+Vector3 Surface::center(const GeometryContext& gctx) const {
+  // fast access via transform matrix (and not translation())
   auto tMatrix = transform(gctx).matrix();
   return Vector3(tMatrix(0, 3), tMatrix(1, 3), tMatrix(2, 3));
 }
 
-Acts::Vector3 Acts::Surface::normal(const GeometryContext& gctx,
-                                    const Vector3& /*unused*/) const {
-  return normal(gctx, Vector2(Vector2::Zero()));
-}
-
-const Acts::Transform3& Acts::Surface::transform(
-    const GeometryContext& gctx) const {
+const Transform3& Surface::transform(const GeometryContext& gctx) const {
   if (m_associatedDetElement != nullptr) {
     return m_associatedDetElement->transform(gctx);
   }
-  return m_transform;
+  return *m_transform;
 }
 
-bool Acts::Surface::insideBounds(const Vector2& lposition,
-                                 const BoundaryCheck& bcheck) const {
-  return bounds().inside(lposition, bcheck);
+Vector2 Surface::closestPointOnBoundary(const Vector2& lposition,
+                                        const SquareMatrix2& metric) const {
+  return bounds().closestPoint(lposition, metric);
 }
 
-Acts::RotationMatrix3 Acts::Surface::referenceFrame(
-    const GeometryContext& gctx, const Vector3& /*unused*/,
-    const Vector3& /*unused*/) const {
+double Surface::distanceToBoundary(const Vector2& lposition) const {
+  return bounds().distance(lposition);
+}
+
+bool Surface::insideBounds(const Vector2& lposition,
+                           const BoundaryTolerance& boundaryTolerance) const {
+  return bounds().inside(lposition, boundaryTolerance);
+}
+
+RotationMatrix3 Surface::referenceFrame(const GeometryContext& gctx,
+                                        const Vector3& /*position*/,
+                                        const Vector3& /*direction*/) const {
   return transform(gctx).matrix().block<3, 3>(0, 0);
 }
 
-Acts::BoundToFreeMatrix Acts::Surface::boundToFreeJacobian(
-    const GeometryContext& gctx, const BoundVector& boundParams) const {
-  // Transform from bound to free parameters
-  FreeVector freeParams =
-      detail::transformBoundToFreeParameters(*this, gctx, boundParams);
-  // The global position
-  const Vector3 position = freeParams.segment<3>(eFreePos0);
-  // The direction
-  const Vector3 direction = freeParams.segment<3>(eFreeDir0);
-  // Use fast evaluation function of sin/cos
-  auto [cosPhi, sinPhi, cosTheta, sinTheta, invSinTheta] =
-      VectorHelpers::evaluateTrigonomics(direction);
+BoundToFreeMatrix Surface::boundToFreeJacobian(const GeometryContext& gctx,
+                                               const Vector3& position,
+                                               const Vector3& direction) const {
+  assert(isOnSurface(gctx, position, direction, BoundaryTolerance::Infinite()));
+
   // retrieve the reference frame
   const auto rframe = referenceFrame(gctx, position, direction);
+
   // Initialize the jacobian from local to global
   BoundToFreeMatrix jacToGlobal = BoundToFreeMatrix::Zero();
   // the local error components - given by reference frame
@@ -264,84 +281,89 @@ Acts::BoundToFreeMatrix Acts::Surface::boundToFreeJacobian(
   // the time component
   jacToGlobal(eFreeTime, eBoundTime) = 1;
   // the momentum components
-  jacToGlobal(eFreeDir0, eBoundPhi) = (-sinTheta) * sinPhi;
-  jacToGlobal(eFreeDir0, eBoundTheta) = cosTheta * cosPhi;
-  jacToGlobal(eFreeDir1, eBoundPhi) = sinTheta * cosPhi;
-  jacToGlobal(eFreeDir1, eBoundTheta) = cosTheta * sinPhi;
-  jacToGlobal(eFreeDir2, eBoundTheta) = (-sinTheta);
+  jacToGlobal.block<3, 2>(eFreeDir0, eBoundPhi) =
+      sphericalToFreeDirectionJacobian(direction);
   jacToGlobal(eFreeQOverP, eBoundQOverP) = 1;
   return jacToGlobal;
 }
 
-Acts::FreeToBoundMatrix Acts::Surface::freeToBoundJacobian(
-    const GeometryContext& gctx, const FreeVector& parameters) const {
-  // The global position
-  const auto position = parameters.segment<3>(eFreePos0);
-  // The direction
-  const auto direction = parameters.segment<3>(eFreeDir0);
-  // Use fast evaluation function of sin/cos
-  auto [cosPhi, sinPhi, cosTheta, sinTheta, invSinTheta] =
-      VectorHelpers::evaluateTrigonomics(direction);
+FreeToBoundMatrix Surface::freeToBoundJacobian(const GeometryContext& gctx,
+                                               const Vector3& position,
+                                               const Vector3& direction) const {
+  assert(isOnSurface(gctx, position, direction, BoundaryTolerance::Infinite()));
+
   // The measurement frame of the surface
   RotationMatrix3 rframeT =
       referenceFrame(gctx, position, direction).transpose();
-  // Initalize the jacobian from global to local
+
+  // Initialize the jacobian from global to local
   FreeToBoundMatrix jacToLocal = FreeToBoundMatrix::Zero();
-  // Local position component given by the refernece frame
+  // Local position component given by the reference frame
   jacToLocal.block<2, 3>(eBoundLoc0, eFreePos0) = rframeT.block<2, 3>(0, 0);
   // Time component
   jacToLocal(eBoundTime, eFreeTime) = 1;
   // Directional and momentum elements for reference frame surface
-  jacToLocal(eBoundPhi, eFreeDir0) = -sinPhi * invSinTheta;
-  jacToLocal(eBoundPhi, eFreeDir1) = cosPhi * invSinTheta;
-  jacToLocal(eBoundTheta, eFreeDir0) = cosPhi * cosTheta;
-  jacToLocal(eBoundTheta, eFreeDir1) = sinPhi * cosTheta;
-  jacToLocal(eBoundTheta, eFreeDir2) = -sinTheta;
+  jacToLocal.block<2, 3>(eBoundPhi, eFreeDir0) =
+      freeToSphericalDirectionJacobian(direction);
   jacToLocal(eBoundQOverP, eFreeQOverP) = 1;
   return jacToLocal;
 }
 
-Acts::FreeToPathMatrix Acts::Surface::freeToPathDerivative(
-    const GeometryContext& gctx, const FreeVector& parameters) const {
-  // The global position
-  const auto position = parameters.segment<3>(eFreePos0);
-  // The direction
-  const auto direction = parameters.segment<3>(eFreeDir0);
+FreeToPathMatrix Surface::freeToPathDerivative(const GeometryContext& gctx,
+                                               const Vector3& position,
+                                               const Vector3& direction) const {
+  assert(isOnSurface(gctx, position, direction, BoundaryTolerance::Infinite()));
+
   // The measurement frame of the surface
   const RotationMatrix3 rframe = referenceFrame(gctx, position, direction);
   // The measurement frame z axis
   const Vector3 refZAxis = rframe.col(2);
   // Cosine of angle between momentum direction and measurement frame z axis
-  const ActsScalar dz = refZAxis.dot(direction);
+  const double dz = refZAxis.dot(direction);
   // Initialize the derivative
   FreeToPathMatrix freeToPath = FreeToPathMatrix::Zero();
   freeToPath.segment<3>(eFreePos0) = -1.0 * refZAxis.transpose() / dz;
   return freeToPath;
 }
 
-const Acts::DetectorElementBase* Acts::Surface::associatedDetectorElement()
-    const {
+const DetectorElementBase* Surface::associatedDetectorElement() const {
   return m_associatedDetElement;
 }
 
-const Acts::Layer* Acts::Surface::associatedLayer() const {
-  return (m_associatedLayer);
+const Layer* Surface::associatedLayer() const {
+  return m_associatedLayer;
 }
 
-const Acts::ISurfaceMaterial* Acts::Surface::surfaceMaterial() const {
+const ISurfaceMaterial* Surface::surfaceMaterial() const {
   return m_surfaceMaterial.get();
 }
 
-const std::shared_ptr<const Acts::ISurfaceMaterial>&
-Acts::Surface::surfaceMaterialSharedPtr() const {
+const std::shared_ptr<const ISurfaceMaterial>&
+Surface::surfaceMaterialSharedPtr() const {
   return m_surfaceMaterial;
 }
 
-void Acts::Surface::assignSurfaceMaterial(
-    std::shared_ptr<const Acts::ISurfaceMaterial> material) {
+void Surface::assignDetectorElement(const DetectorElementBase& detelement) {
+  m_associatedDetElement = &detelement;
+  // resetting the transform as it will be handled through the detector element
+  // now
+  m_transform.reset();
+}
+
+void Surface::assignSurfaceMaterial(
+    std::shared_ptr<const ISurfaceMaterial> material) {
   m_surfaceMaterial = std::move(material);
 }
 
-void Acts::Surface::associateLayer(const Acts::Layer& lay) {
+void Surface::associateLayer(const Layer& lay) {
   m_associatedLayer = (&lay);
 }
+
+void Surface::visualize(IVisualization3D& helper, const GeometryContext& gctx,
+                        const ViewConfig& viewConfig) const {
+  Polyhedron polyhedron =
+      polyhedronRepresentation(gctx, viewConfig.quarterSegments);
+  polyhedron.visualize(helper, viewConfig);
+}
+
+}  // namespace Acts

@@ -1,34 +1,34 @@
 include(ActsTargetLinkLibrariesSystem)
 
-add_library(
-  ActsExamplesIoCsv SHARED
-  src/CsvMeasurementReader.cpp
-  src/CsvMeasurementWriter.cpp
-  src/CsvParticleReader.cpp
-  src/CsvParticleWriter.cpp
-  src/CsvPlanarClusterReader.cpp
-  src/CsvPlanarClusterWriter.cpp
-  src/CsvSimHitReader.cpp
-  src/CsvSimHitWriter.cpp
-  src/CsvSpacePointReader.cpp
-  src/CsvTrackingGeometryWriter.cpp
-  src/CsvTrackParameterReader.cpp
-  src/CsvMultiTrajectoryWriter.cpp 
-  src/CsvSpacePointWriter.cpp
-  src/CsvBFieldWriter.cpp)
+acts_add_library(
+    ExamplesIoCsv
+    SHARED
+    src/CsvMeasurementReader.cpp
+    src/CsvMeasurementWriter.cpp
+    src/CsvParticleReader.cpp
+    src/CsvParticleWriter.cpp
+    src/CsvSimHitReader.cpp
+    src/CsvSimHitWriter.cpp
+    src/CsvSpacePointReader.cpp
+    src/CsvTrackingGeometryWriter.cpp
+    src/CsvTrackParameterReader.cpp
+    src/CsvTrackParameterWriter.cpp
+    src/CsvSeedWriter.cpp
+    src/CsvTrackWriter.cpp
+    src/CsvMuonSpacePointReader.cpp
+    src/CsvMuonSegmentReader.cpp
+    src/CsvProtoTrackWriter.cpp
+    src/CsvSpacePointWriter.cpp
+    src/CsvGnnGraphWriter.cpp
+    src/CsvGnnGraphReader.cpp
+    src/CsvSpacePointsBucketWriter.cpp
+    src/CsvBFieldWriter.cpp
+)
 target_include_directories(
-  ActsExamplesIoCsv
-  PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    ActsExamplesIoCsv
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+)
 target_link_libraries(
-  ActsExamplesIoCsv
-  PRIVATE
-    ActsCore ActsPluginIdentification
-    ActsExamplesFramework ActsExamplesDigitization
-    Threads::Threads)
-acts_target_link_libraries_system(
-  ActsExamplesIoCsv
-  PRIVATE dfelibs)
-
-install(
-  TARGETS ActsExamplesIoCsv
-  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+    ActsExamplesIoCsv
+    PRIVATE Acts::ExamplesFramework Acts::ExamplesDigitization Threads::Threads
+)

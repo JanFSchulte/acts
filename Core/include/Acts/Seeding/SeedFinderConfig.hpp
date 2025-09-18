@@ -1,19 +1,23 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Definitions/Units.hpp"
+#include "Acts/Material/Interactions.hpp"
 #include "Acts/Seeding/SeedConfirmationRangeConfig.hpp"
 #include "Acts/Utilities/Delegate.hpp"
 
+#include <limits>
 #include <memory>
+#include <numbers>
+#include <vector>
 
 namespace Acts {
 
@@ -21,186 +25,191 @@ namespace Acts {
 template <typename T>
 class SeedFilter;
 
+/// @brief Structure that holds configuration parameters for the seed finder algorithm
 template <typename SpacePoint>
 struct SeedFinderConfig {
-  std::shared_ptr<Acts::SeedFilter<SpacePoint>> seedFilter;
+  std::shared_ptr<SeedFilter<SpacePoint>> seedFilter;
 
-  // Seed Cuts
-  // lower cutoff for seeds
-  float minPt = 400. * Acts::UnitConstants::MeV;
-  // cot of maximum theta angle
-  // equivalent to 2.7 eta (pseudorapidity)
-  float cotThetaMax = 7.40627;
-  // minimum distance in r between two measurements within one seed
-  float deltaRMin = 5 * Acts::UnitConstants::mm;
-  // maximum distance in r between two measurements within one seed
-  float deltaRMax = 270 * Acts::UnitConstants::mm;
-  // minimum distance in r between middle and top SP
-  float deltaRMinTopSP = std::numeric_limits<float>::quiet_NaN();
-  // maximum distance in r between middle and top SP
-  float deltaRMaxTopSP = std::numeric_limits<float>::quiet_NaN();
-  // minimum distance in r between middle and bottom SP
-  float deltaRMinBottomSP = std::numeric_limits<float>::quiet_NaN();
-  // maximum distance in r between middle and bottom SP
-  float deltaRMaxBottomSP = std::numeric_limits<float>::quiet_NaN();
-  // radial bin size for filling space point grid
-  float binSizeR = 1. * Acts::UnitConstants::mm;
+  /// Seeding parameters used in the space-point grid creation and bin finding
 
-  // force sorting of middle SPs in radius
-  bool forceRadialSorting = false;
+  /// Geometry Settings + Detector ROI
+  /// (r, z, phi) range for limiting location of all measurements and grid
+  /// creation
+  float phiMin = -std::numbers::pi_v<float>;
+  float phiMax = std::numbers::pi_v<float>;
+  float zMin = -2800 * UnitConstants::mm;
+  float zMax = 2800 * UnitConstants::mm;
+  float rMax = 600 * UnitConstants::mm;
+  /// WARNING: if rMin is smaller than impactMax, the bin size will be 2*pi,
+  /// which will make seeding very slow!
+  float rMin = 33 * UnitConstants::mm;
 
-  // radial range for middle SP
-  // variable range based on SP radius
-  bool useVariableMiddleSPRange = true;
-  float deltaRMiddleMinSPRange = 10. * Acts::UnitConstants::mm;
-  float deltaRMiddleMaxSPRange = 10. * Acts::UnitConstants::mm;
-  // range defined in vector for each z region
-  std::vector<std::vector<float>> rRangeMiddleSP;
-  // range defined by rMinMiddle and rMaxMiddle
-  float rMinMiddle = 60.f * Acts::UnitConstants::mm;
-  float rMaxMiddle = 120.f * Acts::UnitConstants::mm;
-
-  // cut to the maximum value of delta z between SPs
-  float deltaZMax =
-      std::numeric_limits<float>::infinity() * Acts::UnitConstants::mm;
-
-  // enable cut on the compatibility between interaction point and SPs
-  bool interactionPointCut = false;
-
-  // use arithmetic average in the calculation of the squared error on the
-  // difference in tan(theta)
-  bool arithmeticAverageCotTheta = false;
-
-  // non equidistant binning in z
+  /// Vector containing the z-bin edges for non equidistant binning in z
   std::vector<float> zBinEdges;
 
-  // skip top SPs based on cotTheta sorting when producing triplets
-  bool skipPreviousTopSP = false;
+  /// Order of z bins to loop over when searching for SPs
+  std::vector<std::size_t> zBinsCustomLooping = {};
 
-  // seed confirmation
-  bool seedConfirmation = false;
-  // parameters for central seed confirmation
-  SeedConfirmationRangeConfig centralSeedConfirmationRange;
-  // parameters for forward seed confirmation
-  SeedConfirmationRangeConfig forwardSeedConfirmationRange;
+  /// Radial bin size used in space-point grid
+  float binSizeR = 1. * UnitConstants::mm;
 
-  // FIXME: this is not used yet
-  //        float upperPtResolutionPerSeed = 20* Acts::GeV;
+  /// Seeding parameters used to define the region of interest for middle
+  /// space-point
 
-  // the delta for inverse helix radius up to which compared seeds
-  // are considered to have a compatible radius. delta of inverse radius
-  // leads to this value being the cutoff. unit is 1/mm. default value
-  // of 0.00003 leads to all helices with radius>33m to be considered compatible
+  /// Radial range for middle space-point
+  /// The range can be defined manually with (rMinMiddle, rMaxMiddle). If
+  /// useVariableMiddleSPRange is set to false and the vector rRangeMiddleSP is
+  /// empty, we use (rMinMiddle, rMaxMiddle) to cut the middle space-points
+  float rMinMiddle = 60.f * UnitConstants::mm;
+  float rMaxMiddle = 120.f * UnitConstants::mm;
+  /// If useVariableMiddleSPRange is set to false, the vector rRangeMiddleSP can
+  /// be used to define a fixed r range for each z bin: {{rMin, rMax}, ...}
+  bool useVariableMiddleSPRange = false;
+  /// Range defined in vector for each z bin
+  std::vector<std::vector<float>> rRangeMiddleSP;
+  /// If useVariableMiddleSPRange is true, the radial range will be calculated
+  /// based on the maximum and minimum r values of the space-points in the event
+  /// and a deltaR (deltaRMiddleMinSPRange, deltaRMiddleMaxSPRange)
+  float deltaRMiddleMinSPRange = 10. * UnitConstants::mm;
+  float deltaRMiddleMaxSPRange = 10. * UnitConstants::mm;
 
-  // impact parameter
-  float impactMax = 20. * Acts::UnitConstants::mm;
+  /// Seeding parameters used to define the cuts on space-point doublets
 
-  // how many sigmas of scattering angle should be considered?
+  /// Minimum radial distance between two doublet components (prefer
+  /// deltaRMinTopSP and deltaRMinBottomSP to set separate values for outer and
+  /// inner space-points)
+  float deltaRMin = 5 * UnitConstants::mm;
+  /// Maximum radial distance between two doublet components (prefer
+  /// deltaRMaxTopSP and deltaRMacBottomSP to set separate values for outer and
+  /// inner space-points)
+  float deltaRMax = 270 * UnitConstants::mm;
+  /// Minimum radial distance between middle-outer doublet components
+  float deltaRMinTopSP = std::numeric_limits<float>::quiet_NaN();
+  /// Maximum radial distance between middle-outer doublet components
+  float deltaRMaxTopSP = std::numeric_limits<float>::quiet_NaN();
+  /// Minimum radial distance between inner-middle doublet components
+  float deltaRMinBottomSP = std::numeric_limits<float>::quiet_NaN();
+  /// Maximum radial distance between inner-middle doublet components
+  float deltaRMaxBottomSP = std::numeric_limits<float>::quiet_NaN();
+
+  /// Maximum value of z-distance between space-points in doublet
+  float deltaZMax = std::numeric_limits<float>::infinity() * UnitConstants::mm;
+
+  /// Maximum allowed cotTheta between two space-points in doublet, used to
+  /// check if forward angle is within bounds
+  float cotThetaMax = 10.01788;  // equivalent to eta = 3 (pseudorapidity)
+
+  /// Limiting location of collision region in z-axis used to check if doublet
+  /// origin is within reasonable bounds
+  float collisionRegionMin = -150 * UnitConstants::mm;
+  float collisionRegionMax = +150 * UnitConstants::mm;
+
+  /// Enable cut on the compatibility between interaction point and doublet,
+  /// this is an useful approximation to speed up the seeding
+  bool interactionPointCut = false;
+
+  /// Seeding parameters used to define the cuts on space-point triplets
+
+  /// Minimum transverse momentum (pT) used to check the r-z slope compatibility
+  /// of triplets with maximum multiple scattering effect (produced by the
+  /// minimum allowed pT particle) + a certain uncertainty term. Check the
+  /// documentation for more information
+  /// https://acts.readthedocs.io/en/latest/core/reconstruction/pattern_recognition/seeding.html
+  float minPt = 400. * UnitConstants::MeV;
+  /// Number of sigmas of scattering angle to be considered in the minimum pT
+  /// scattering term
   float sigmaScattering = 5;
-  // Upper pt limit for scattering calculation
-  float maxPtScattering = 10 * Acts::UnitConstants::GeV;
+  /// Term that accounts for the thickness of scattering medium in radiation
+  /// lengths in the Lynch & Dahl correction to the Highland equation default is
+  /// 5%
+  /// TODO: necessary to make amount of material dependent on detector region?
+  float radLengthPerSeed = 0.05;
+  /// Maximum transverse momentum for scattering calculation
+  float maxPtScattering = 10 * UnitConstants::GeV;
+  /// Maximum value of impact parameter estimation of the seed candidates
+  float impactMax = 20. * UnitConstants::mm;
+  /// Parameter which can loosen the tolerance of the track seed to form a
+  /// helix. This is useful for e.g. misaligned seeding.
+  float helixCutTolerance = 1.;
 
-  // for how many seeds can one SpacePoint be the middle SpacePoint?
+  /// Seeding parameters used for quality seed confirmation
+
+  /// Enable quality seed confirmation, this is different than default seeding
+  /// confirmation because it can also be defined for different (r, z) regions
+  /// of the detector (e.g. forward or central region) by SeedConfirmationRange.
+  /// Seeds are classified as "high-quality" seeds and normal quality seeds.
+  /// Normal quality seeds are only selected if no other "high-quality" seeds
+  /// has been found for that inner-middle doublet.
+  bool seedConfirmation = false;
+  /// Contains parameters for central seed confirmation
+  SeedConfirmationRangeConfig centralSeedConfirmationRange;
+  /// Contains parameters for forward seed confirmation
+  SeedConfirmationRangeConfig forwardSeedConfirmationRange;
+  /// Maximum number (minus one) of accepted seeds per middle space-point
   unsigned int maxSeedsPerSpM = 5;
 
-  // tolerance parameter used to check the compatibility of SPs coordinates in
-  // xyz
-  float toleranceParam = 1.1 * Acts::UnitConstants::mm;
+  /// Other parameters
 
-  // Geometry Settings
-  // Detector ROI
-  // limiting location of collision region in z
-  float collisionRegionMin = -150 * Acts::UnitConstants::mm;
-  float collisionRegionMax = +150 * Acts::UnitConstants::mm;
-  float phiMin = -M_PI;
-  float phiMax = M_PI;
-  // limiting location of measurements
-  float zMin = -2800 * Acts::UnitConstants::mm;
-  float zMax = 2800 * Acts::UnitConstants::mm;
-  float rMax = 600 * Acts::UnitConstants::mm;
-  // WARNING: if rMin is smaller than impactMax, the bin size will be 2*pi,
-  // which will make seeding very slow!
-  float rMin = 33 * Acts::UnitConstants::mm;
-
-  std::vector<size_t> zBinsCustomLooping = {};
-
-  // average radiation lengths of material on the length of a seed. used for
-  // scattering.
-  // default is 5%
-  // TODO: necessary to make amount of material dependent on detector region?
-  float radLengthPerSeed = 0.05;
-  // alignment uncertainties, used for uncertainties in the
-  // non-measurement-plane of the modules
-  // which otherwise would be 0
-  // will be added to spacepoint measurement uncertainties (and therefore also
-  // multiplied by sigmaError)
-  // FIXME: call align1 and align2
-  float zAlign = 0 * Acts::UnitConstants::mm;
-  float rAlign = 0 * Acts::UnitConstants::mm;
-  // used for measurement (+alignment) uncertainties.
-  // find seeds within 5sigma error ellipse
+  /// Alignment uncertainties, used for uncertainties in the
+  /// non-measurement-plane of the modules
+  /// which otherwise would be 0
+  /// will be added to spacepoint measurement uncertainties (and therefore also
+  /// multiplied by sigmaError)
+  /// FIXME: call align1 and align2
+  float zAlign = 0 * UnitConstants::mm;
+  float rAlign = 0 * UnitConstants::mm;
+  /// used for measurement (+alignment) uncertainties.
+  /// find seeds within 5sigma error ellipse
   float sigmaError = 5;
 
-  // derived values, set on SeedFinder construction
+  /// derived values, set on SeedFinder construction
   float highland = 0;
   float maxScatteringAngle2 = 0;
-  float pTPerHelixRadius = 0;
-  float minHelixDiameter2 = 0;
-  float pT2perRadius = 0;
-  float sigmapT2perRadius = 0;
 
-  // only for Cuda plugin
+  /// only for Cuda plugin
   int maxBlockSize = 1024;
   int nTrplPerSpBLimit = 100;
   int nAvgTrplPerSpBLimit = 2;
 
-  // Delegates for accessors to detailed information on double measurement that
-  // produced the space point.
-  // This is mainly referring to space points produced when combining
-  // measurement from strips on back-to-back modules.
-  // Enables setting of the following delegates.
+  /// Delegates for accessors to detailed information on double measurement that
+  /// produced the space point.
+  /// This is mainly referring to space points produced when combining
+  /// measurement from strips on back-to-back modules.
+  /// Enables setting of the following delegates.
   bool useDetailedDoubleMeasurementInfo = false;
-  // Returns half of the length of the top strip.
-  Delegate<float(const SpacePoint&)> getTopHalfStripLength;
-  // Returns half of the length of the bottom strip.
-  Delegate<float(const SpacePoint&)> getBottomHalfStripLength;
-  // Returns direction of the top strip.
-  Delegate<Acts::Vector3(const SpacePoint&)> getTopStripDirection;
-  // Returns direction of the bottom strip.
-  Delegate<Acts::Vector3(const SpacePoint&)> getBottomStripDirection;
-  // Returns distance between the centers of the two strips.
-  Delegate<Acts::Vector3(const SpacePoint&)> getStripCenterDistance;
-  // Returns position of the center of the top strip.
-  Delegate<Acts::Vector3(const SpacePoint&)> getTopStripCenterPosition;
 
-  SeedFinderConfig toInternalUnits() const {
-    using namespace Acts::UnitLiterals;
+  Delegate<bool(const SpacePoint&)> spacePointSelector{
+      DelegateFuncTag<voidSpacePointSelector>{}};
+
+  static bool voidSpacePointSelector(const SpacePoint& /*sp*/) { return true; }
+
+  /// Tolerance parameter used to check the compatibility of space-point
+  /// coordinates in xyz. This is only used in a detector specific check for
+  /// strip modules
+  float toleranceParam = 1.1 * UnitConstants::mm;
+
+  // Delegate to apply experiment specific cuts during doublet finding
+  Delegate<bool(const SpacePoint& /*middle*/, const SpacePoint& /*other*/,
+                float /*cotTheta*/, bool /*isBottomCandidate*/)>
+      experimentCuts{DelegateFuncTag<&noopExperimentCuts>{}};
+
+  /// defaults experimental cuts to no operation in both seeding algorithms
+  static bool noopExperimentCuts(const SpacePoint& /*middle*/,
+                                 const SpacePoint& /*other*/,
+                                 float /*cotTheta*/,
+                                 bool /*isBottomCandidate*/) {
+    return true;
+  }
+
+  bool isInInternalUnits = true;
+  //[[deprecated("SeedFinderConfig uses internal units")]]
+  SeedFinderConfig toInternalUnits() const { return *this; }
+
+  SeedFinderConfig calculateDerivedQuantities() const {
     SeedFinderConfig config = *this;
-    config.minPt /= 1_MeV;
-    config.deltaRMin /= 1_mm;
-    config.deltaRMax /= 1_mm;
-    config.binSizeR /= 1_mm;
-    config.deltaRMinTopSP /= 1_mm;
-    config.deltaRMaxTopSP /= 1_mm;
-    config.deltaRMinBottomSP /= 1_mm;
-    config.deltaRMaxBottomSP /= 1_mm;
-    config.deltaRMiddleMinSPRange /= 1_mm;
-    config.deltaRMiddleMaxSPRange /= 1_mm;
-    config.impactMax /= 1_mm;
-    config.maxPtScattering /= 1_MeV;  // correct?
-    config.collisionRegionMin /= 1_mm;
-    config.collisionRegionMax /= 1_mm;
-    config.zMin /= 1_mm;
-    config.zMax /= 1_mm;
-    config.rMax /= 1_mm;
-    config.rMin /= 1_mm;
-    config.deltaZMax /= 1_mm;
-
-    config.zAlign /= 1_mm;
-    config.rAlign /= 1_mm;
-
-    config.toleranceParam /= 1_mm;
-
+    config.highland = approximateHighlandScattering(config.radLengthPerSeed);
+    const float maxScatteringAngle = config.highland / minPt;
+    config.maxScatteringAngle2 = maxScatteringAngle * maxScatteringAngle;
     return config;
   }
 };
@@ -208,19 +217,37 @@ struct SeedFinderConfig {
 struct SeedFinderOptions {
   // location of beam in x,y plane.
   // used as offset for Space Points
-  Acts::Vector2 beamPos{0 * Acts::UnitConstants::mm,
-                        0 * Acts::UnitConstants::mm};
+  Vector2 beamPos{0 * UnitConstants::mm, 0 * UnitConstants::mm};
+  // field induction
+  float bFieldInZ = 2 * UnitConstants::T;
 
-  float bFieldInZ = 2.08 * Acts::UnitConstants::T;
+  // derived quantities
+  float pTPerHelixRadius = std::numeric_limits<float>::quiet_NaN();
+  float minHelixDiameter2 = std::numeric_limits<float>::quiet_NaN();
+  float pT2perRadius = std::numeric_limits<float>::quiet_NaN();
+  float sigmapT2perRadius = std::numeric_limits<float>::quiet_NaN();
+  float multipleScattering2 = std::numeric_limits<float>::quiet_NaN();
 
-  SeedFinderOptions toInternalUnits() const {
-    using namespace Acts::UnitLiterals;
+  bool isInInternalUnits = true;
+  //[[deprecated("SeedFinderOptions uses internal units")]]
+  SeedFinderOptions toInternalUnits() const { return *this; }
+
+  template <typename Config>
+  SeedFinderOptions calculateDerivedQuantities(const Config& config) const {
+    using namespace UnitLiterals;
+
     SeedFinderOptions options = *this;
-    options.beamPos[0] /= 1_mm;
-    options.beamPos[1] /= 1_mm;
-
-    options.bFieldInZ /= 1000. * 1_T;
-
+    // bFieldInZ is in (pT/radius) natively, no need for conversion
+    options.pTPerHelixRadius = options.bFieldInZ;
+    options.minHelixDiameter2 =
+        std::pow(config.minPt * 2 / options.pTPerHelixRadius, 2) *
+        config.helixCutTolerance;
+    options.pT2perRadius =
+        std::pow(config.highland / options.pTPerHelixRadius, 2);
+    options.sigmapT2perRadius =
+        options.pT2perRadius * std::pow(2 * config.sigmaScattering, 2);
+    options.multipleScattering2 =
+        config.maxScatteringAngle2 * std::pow(config.sigmaScattering, 2);
     return options;
   }
 };

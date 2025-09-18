@@ -1,37 +1,74 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Generators/Pythia8ProcessGenerator.hpp"
 
+#include "Acts/Plugins/FpeMonitoring/FpeMonitor.hpp"
+#include "Acts/Utilities/MathHelpers.hpp"
+#include "ActsExamples/EventData/SimVertex.hpp"
+#include "ActsFatras/EventData/Barcode.hpp"
+#include "ActsFatras/EventData/Particle.hpp"
+
 #include <algorithm>
 #include <iterator>
+#include <ostream>
 #include <random>
+#include <utility>
 
+#include <HepMC3/WriterAscii.h>
 #include <Pythia8/Pythia.h>
+#include <Pythia8Plugins/HepMC3.h>
 
-namespace {
-struct FrameworkRndmEngine : public Pythia8::RndmEngine {
-  ActsExamples::RandomEngine& rng;
+namespace ActsExamples {
 
-  FrameworkRndmEngine(ActsExamples::RandomEngine& rng_) : rng(rng_) {}
+struct Pythia8RandomEngineWrapper : public Pythia8::RndmEngine {
+  RandomEngine* rng{nullptr};
+
+  struct {
+    std::size_t numUniformRandomNumbers = 0;
+    double first = std::numeric_limits<double>::quiet_NaN();
+    double last = std::numeric_limits<double>::quiet_NaN();
+  } statistics;
+
+  Pythia8RandomEngineWrapper() = default;
+
   double flat() override {
-    return std::uniform_real_distribution<double>(0.0, 1.0)(rng);
-  }
-};
-}  // namespace
+    if (rng == nullptr) {
+      throw std::runtime_error(
+          "Pythia8RandomEngineWrapper: no random engine set");
+    }
 
-ActsExamples::Pythia8Generator::Pythia8Generator(const Config& cfg,
-                                                 Acts::Logging::Level lvl)
+    double value = std::uniform_real_distribution<double>(0.0, 1.0)(*rng);
+    if (statistics.numUniformRandomNumbers == 0) {
+      statistics.first = value;
+    }
+    statistics.last = value;
+    statistics.numUniformRandomNumbers++;
+    return value;
+  }
+
+  void setRandomEngine(RandomEngine& rng_) { rng = &rng_; }
+  void clearRandomEngine() { rng = nullptr; }
+};
+
+struct Pythia8GeneratorImpl {
+  std::unique_ptr<HepMC3::Writer> m_hepMC3Writer;
+  std::unique_ptr<HepMC3::Pythia8ToHepMC3> m_hepMC3Converter;
+  std::shared_ptr<Pythia8RandomEngineWrapper> m_pythia8RndmEngine;
+};
+
+Pythia8Generator::Pythia8Generator(const Config& cfg, Acts::Logging::Level lvl)
     : m_cfg(cfg),
       m_logger(Acts::getDefaultLogger("Pythia8Generator", lvl)),
       m_pythia8(std::make_unique<Pythia8::Pythia>("", false)) {
-  // disable all output by default but allow reenable via config
-  m_pythia8->settings.flag("Print:quiet", false);
+  ACTS_INFO("Pythia8Generator: init");
+  // disable all output by default but allow re-enable via config
+  m_pythia8->settings.flag("Print:quiet", true);
   for (const auto& setting : m_cfg.settings) {
     std::cout << setting << std::endl;
     ACTS_VERBOSE("use Pythia8 setting '" << setting << "'");
@@ -42,25 +79,52 @@ ActsExamples::Pythia8Generator::Pythia8Generator(const Config& cfg,
   m_pythia8->settings.mode("Beams:frameType", 1);
   m_pythia8->settings.parm("Beams:eCM",
                            m_cfg.cmsEnergy / Acts::UnitConstants::GeV);
+
+  m_impl = std::make_unique<Pythia8GeneratorImpl>();
+
+  m_impl->m_pythia8RndmEngine = std::make_shared<Pythia8RandomEngineWrapper>();
+
+#if PYTHIA_VERSION_INTEGER >= 8310
+  m_pythia8->setRndmEnginePtr(m_impl->m_pythia8RndmEngine);
+#else
+  m_pythia8->setRndmEnginePtr(m_impl->m_pythia8RndmEngine.get());
+#endif
+
+  RandomEngine rng{m_cfg.initializationSeed};
+  m_impl->m_pythia8RndmEngine->setRandomEngine(rng);
   m_pythia8->init();
+  m_impl->m_pythia8RndmEngine->clearRandomEngine();
+
+  m_impl->m_hepMC3Converter = std::make_unique<HepMC3::Pythia8ToHepMC3>();
+  if (m_cfg.writeHepMC3.has_value()) {
+    ACTS_DEBUG("Initializing HepMC3 output to: " << m_cfg.writeHepMC3.value());
+    m_impl->m_hepMC3Writer =
+        std::make_unique<HepMC3::WriterAscii>(m_cfg.writeHepMC3.value());
+  }
 }
 
 // needed to allow unique_ptr of forward-declared Pythia class
-ActsExamples::Pythia8Generator::~Pythia8Generator() = default;
+Pythia8Generator::~Pythia8Generator() {
+  if (m_impl->m_hepMC3Writer) {
+    m_impl->m_hepMC3Writer->close();
+  }
 
-ActsExamples::SimParticleContainer ActsExamples::Pythia8Generator::operator()(
+  ACTS_DEBUG("Pythia8Generator produced "
+             << m_impl->m_pythia8RndmEngine->statistics.numUniformRandomNumbers
+             << " uniform random numbers");
+  ACTS_DEBUG("                 first = "
+             << m_impl->m_pythia8RndmEngine->statistics.first);
+  ACTS_DEBUG("                  last = "
+             << m_impl->m_pythia8RndmEngine->statistics.last);
+}
+
+std::shared_ptr<HepMC3::GenEvent> Pythia8Generator::operator()(
     RandomEngine& rng) {
   using namespace Acts::UnitLiterals;
-
-  SimParticleContainer::sequence_type generated;
-  std::vector<SimParticle::Vector4> vertexPositions;
 
   // pythia8 is not thread safe and generation needs to be protected
   std::lock_guard<std::mutex> lock(m_pythia8Mutex);
   // use per-thread random engine also in pythia
-  FrameworkRndmEngine rndmEngine(rng);
-  m_pythia8->rndm.rndmEnginePtr(&rndmEngine);
-  m_pythia8->next();
 
   // reject all events with a Ds meson
   bool hasTau3Mu = false;
@@ -83,62 +147,34 @@ ActsExamples::SimParticleContainer ActsExamples::Pythia8Generator::operator()(
   // convert generated final state particles into internal format
   for (int ip = 0; ip < m_pythia8->event.size(); ++ip) {
     const auto& genParticle = m_pythia8->event[ip];
+  m_impl->m_pythia8RndmEngine->setRandomEngine(rng);
 
-    // ignore beam particles
-    if (genParticle.statusHepMC() == 4) {
-      continue;
-    }
-    // only interested in final, visible particles
-    if (not genParticle.isFinal()) {
-      continue;
-    }
-    if (not genParticle.isVisible()) {
-      continue;
-    }
-
-    // production vertex. Pythia8 time uses units mm/c, and we use c=1
-    SimParticle::Vector4 pos4(
-        genParticle.xProd() * 1_mm, genParticle.yProd() * 1_mm,
-        genParticle.zProd() * 1_mm, genParticle.tProd() * 1_mm);
-
-    // define the particle identifier including possible secondary vertices
-    ActsFatras::Barcode particleId(0u);
-    // ensure particle identifier component is non-zero
-    particleId.setParticle(1u + generated.size());
-    // only secondaries have a defined vertex position
-    if (genParticle.hasVertex()) {
-      // either add to existing secondary vertex if exists or create new one
-      // TODO can we do this w/o the manual search and position check?
-      auto it = std::find_if(
-          vertexPositions.begin(), vertexPositions.end(),
-          [=](const SimParticle::Vector4& pos) { return (pos == pos4); });
-      if (it == vertexPositions.end()) {
-        // no matching secondary vertex exists -> create new one
-        vertexPositions.emplace_back(pos4);
-        particleId.setVertexSecondary(vertexPositions.size());
-        ACTS_VERBOSE("created new secondary vertex " << pos4.transpose());
-      } else {
-        particleId.setVertexSecondary(
-            1u + std::distance(vertexPositions.begin(), it));
-      }
-    }
-
-    // construct internal particle
-    const auto pdg = static_cast<Acts::PdgParticle>(genParticle.id());
-    const auto charge = genParticle.charge() * 1_e;
-    const auto mass = genParticle.m0() * 1_GeV;
-    ActsFatras::Particle particle(particleId, pdg, charge, mass);
-    particle.setPosition4(pos4);
-    // normalization/ units are not import for the direction
-    particle.setDirection(genParticle.px(), genParticle.py(), genParticle.pz());
-    particle.setAbsoluteMomentum(
-        std::hypot(genParticle.px(), genParticle.py(), genParticle.pz()) *
-        1_GeV);
-
-    generated.push_back(std::move(particle));
+  {
+    Acts::FpeMonitor mon{0};  // disable all FPEs while we're in Pythia8
+    m_pythia8->next();
   }
 
-  SimParticleContainer out;
-  out.insert(generated.begin(), generated.end());
-  return out;
+  if (m_cfg.printShortEventListing) {
+    m_pythia8->process.list();
+  }
+  if (m_cfg.printLongEventListing) {
+    m_pythia8->event.list();
+  }
+
+  auto genEvent = std::make_shared<HepMC3::GenEvent>();
+  genEvent->set_units(HepMC3::Units::GEV, HepMC3::Units::MM);
+
+  assert(m_impl->m_hepMC3Converter != nullptr);
+  m_impl->m_hepMC3Converter->fill_next_event(*m_pythia8, genEvent.get(),
+                                             genEvent->event_number());
+
+  if (m_impl->m_hepMC3Converter && m_impl->m_hepMC3Writer) {
+    m_impl->m_hepMC3Writer->write_event(*genEvent);
+  }
+
+  m_impl->m_pythia8RndmEngine->clearRandomEngine();
+
+  return genEvent;
 }
+
+}  // namespace ActsExamples

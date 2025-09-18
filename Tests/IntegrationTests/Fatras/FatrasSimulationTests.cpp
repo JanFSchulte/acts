@@ -1,19 +1,19 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/data/test_case.hpp>
 #include <boost/test/unit_test.hpp>
 
-#include "Acts/EventData/NeutralTrackParameters.hpp"
-#include "Acts/EventData/TrackParameters.hpp"
+#include "Acts/Definitions/ParticleData.hpp"
 #include "Acts/MagneticField/ConstantBField.hpp"
 #include "Acts/Propagator/EigenStepper.hpp"
 #include "Acts/Propagator/Navigator.hpp"
+#include "Acts/Propagator/Propagator.hpp"
 #include "Acts/Propagator/StraightLineStepper.hpp"
 #include "Acts/Tests/CommonHelpers/CylindricalTrackingGeometry.hpp"
 #include "Acts/Utilities/Logger.hpp"
@@ -24,7 +24,6 @@
 #include "ActsFatras/Physics/StandardInteractions.hpp"
 #include "ActsFatras/Selectors/ParticleSelectors.hpp"
 #include "ActsFatras/Selectors/SurfaceSelectors.hpp"
-#include "ActsFatras/Utilities/ParticleData.hpp"
 
 #include <algorithm>
 #include <random>
@@ -38,7 +37,8 @@ struct SplitEnergyLoss {
   double splitMomentumMin = 5_GeV;
 
   template <typename generator_t>
-  bool operator()(generator_t& /*unused*/, const Acts::MaterialSlab& /*unused*/,
+  bool operator()(generator_t& /*generator*/,
+                  const Acts::MaterialSlab& /*slab*/,
                   ActsFatras::Particle& particle,
                   std::vector<ActsFatras::Particle>& generated) const {
     const auto p = particle.absoluteMomentum();
@@ -123,10 +123,8 @@ const auto dataset =
 // helper functions for tests
 template <typename Container>
 void sortByParticleId(Container& container) {
-  std::sort(container.begin(), container.end(),
-            [](const auto& lhs, const auto& rhs) {
-              return lhs.particleId() < rhs.particleId();
-            });
+  std::ranges::sort(container, std::less{},
+                    [](const auto& c) { return c.particleId(); });
 }
 template <typename Container>
 bool areParticleIdsUnique(const Container& sortedByParticleId) {
@@ -152,8 +150,6 @@ bool containsParticleId(const Container& sortedByParticleId,
 
 BOOST_DATA_TEST_CASE(FatrasSimulation, dataset, pdg, phi, eta, p,
                      numParticles) {
-  using namespace Acts::UnitLiterals;
-
   Acts::GeometryContext geoCtx;
   Acts::MagneticFieldContext magCtx;
   Acts::Logging::Level logLevel = Acts::Logging::Level::DEBUG;
@@ -193,7 +189,7 @@ BOOST_DATA_TEST_CASE(FatrasSimulation, dataset, pdg, phi, eta, p,
     const auto pid = ActsFatras::Barcode().setVertexPrimary(42).setParticle(i);
     const auto particle =
         ActsFatras::Particle(pid, pdg)
-            .setDirection(Acts::makeDirectionUnitFromPhiEta(phi, eta))
+            .setDirection(Acts::makeDirectionFromPhiEta(phi, eta))
             .setAbsoluteMomentum(p);
     input.push_back(std::move(particle));
   }
@@ -220,12 +216,12 @@ BOOST_DATA_TEST_CASE(FatrasSimulation, dataset, pdg, phi, eta, p,
     BOOST_CHECK_EQUAL(initialParticle.mass(), finalParticle.mass());
   }
 
-  // we have no particle cuts and should not loose any particles.
+  // we have no particle cuts and should not lose any particles.
   // might end up with more due to secondaries
   BOOST_CHECK_LE(input.size(), simulatedInitial.size());
   BOOST_CHECK_LE(input.size(), simulatedFinal.size());
   // there should be some hits if we started with a charged particle
-  if (ActsFatras::findCharge(pdg) != 0) {
+  if (Acts::findCharge(pdg) != 0) {
     BOOST_CHECK_LT(0u, hits.size());
   }
 

@@ -1,18 +1,21 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/EventData/Measurement.hpp"
+#include "Acts/Definitions/TrackParametrization.hpp"
+#include "Acts/Definitions/Units.hpp"
 #include "Acts/EventData/TrackParameters.hpp"
+#include "Acts/EventData/detail/TestSourceLink.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/GeometryIdentifier.hpp"
+#include "Acts/Geometry/LayerCreator.hpp"
 #include "Acts/Geometry/TrackingGeometry.hpp"
 #include "Acts/MagneticField/ConstantBField.hpp"
 #include "Acts/MagneticField/MagneticFieldContext.hpp"
@@ -24,10 +27,17 @@
 #include "Acts/Tests/CommonHelpers/CylindricalTrackingGeometry.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 #include "Acts/Tests/CommonHelpers/MeasurementsCreator.hpp"
-#include "Acts/Utilities/CalibrationContext.hpp"
+#include "Acts/Utilities/Logger.hpp"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <optional>
+#include <random>
+#include <utility>
 #include <vector>
 
 #include "SpacePoint.hpp"
@@ -44,7 +54,6 @@ using ConstantFieldPropagator =
 
 const GeometryContext geoCtx;
 const MagneticFieldContext magCtx;
-const CalibrationContext calCtx;
 
 // detector geometry
 CylindricalTrackingGeometry geometryStore(geoCtx);
@@ -56,8 +65,8 @@ const MeasurementResolutionMap resolutions = {
      MeasurementResolution{MeasurementType::eLoc01, {0, 0}}}};
 
 // Construct initial track parameters.
-CurvilinearTrackParameters makeParameters(double phi, double theta, double p,
-                                          double q) {
+BoundTrackParameters makeParameters(double phi, double theta, double p,
+                                    double q) {
   // create covariance matrix from reasonable standard deviations
   Acts::BoundVector stddev;
   stddev[Acts::eBoundLoc0] = 100_um;
@@ -66,10 +75,11 @@ CurvilinearTrackParameters makeParameters(double phi, double theta, double p,
   stddev[Acts::eBoundPhi] = 2_degree;
   stddev[Acts::eBoundTheta] = 2_degree;
   stddev[Acts::eBoundQOverP] = 1 / 100_GeV;
-  BoundSymMatrix cov = stddev.cwiseProduct(stddev).asDiagonal();
+  BoundSquareMatrix cov = stddev.cwiseProduct(stddev).asDiagonal();
   // Let the particle starts from the origin
   Vector4 mPos4(0., 0., 0., 0.);
-  return CurvilinearTrackParameters(mPos4, phi, theta, p, q, cov);
+  return BoundTrackParameters::createCurvilinear(
+      mPos4, phi, theta, q / p, cov, ParticleHypothesis::pionLike(std::abs(q)));
 }
 
 std::default_random_engine rng(42);
@@ -85,8 +95,8 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
       true,  // material
       false  // passive
   });
-  auto field =
-      std::make_shared<Acts::ConstantBField>(Acts::Vector3(0.0, 0.0, 2._T));
+  const Vector3 bField(0, 0, 2._T);
+  auto field = std::make_shared<Acts::ConstantBField>(bField);
   ConstantFieldStepper stepper(std::move(field));
 
   ConstantFieldPropagator propagator(std::move(stepper), std::move(navigator));
@@ -95,6 +105,9 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
   std::array<double, 3> phiArray = {20._degree, 0._degree - 20._degree};
   std::array<double, 3> thetaArray = {80._degree, 90.0_degree, 100._degree};
   std::array<double, 2> qArray = {1, -1};
+
+  auto logger = Acts::getDefaultLogger("estimateTrackParamsFromSeed",
+                                       Acts::Logging::INFO);
 
   for (const auto& p : pArray) {
     for (const auto& phi : phiArray) {
@@ -111,7 +124,7 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
           std::map<GeometryIdentifier::Value, SpacePoint> spacePoints;
           const Surface* bottomSurface = nullptr;
           for (const auto& sl : measurements.sourceLinks) {
-            const auto& geoId = sl.geometryId();
+            const auto geoId = sl.m_geometryId;
             const auto& layer = geoId.layer();
             auto it = spacePoints.find(layer);
             // Avoid to use space point from the same layers
@@ -130,7 +143,8 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
                 layer, SpacePoint{static_cast<float>(globalPos.x()),
                                   static_cast<float>(globalPos.y()),
                                   static_cast<float>(globalPos.z()), r,
-                                  static_cast<int>(geoId.layer()), 0., 0.});
+                                  static_cast<int>(geoId.layer()), 0., 0.,
+                                  std::nullopt, std::nullopt});
             if (spacePoints.size() == 1) {
               bottomSurface = surface;
             }
@@ -147,9 +161,6 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
           BOOST_TEST_INFO(
               "The truth track parameters at the bottom space point: \n"
               << expParams.transpose());
-          // The curvature of track projection on the transverse plane in unit
-          // of 1/mm
-          double rho = expParams[eBoundQOverP] * 0.3 * 2. / UnitConstants::m;
 
           // The space point pointers
           std::array<const SpacePoint*, 3> spacePointPtrs{};
@@ -157,32 +168,16 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
                          spacePointPtrs.begin(),
                          [](const auto& sp) { return &sp.second; });
 
-          // Test the partial track parameters estimator
-          auto partialParamsOpt = estimateTrackParamsFromSeed(
-              spacePointPtrs.begin(), spacePointPtrs.end());
-          BOOST_REQUIRE(partialParamsOpt.has_value());
-          const auto& estPartialParams = partialParamsOpt.value();
-          BOOST_TEST_INFO(
-              "The estimated track parameters at the transverse plane: \n"
-              << estPartialParams.transpose());
+          // Test the free track parameters estimator
+          FreeVector estFreeParams =
+              estimateTrackParamsFromSeed(spacePointPtrs, bField);
+          BOOST_CHECK(!estFreeParams.hasNaN());
 
-          // The particle starting position is (0, 0, 0). Hence, d0 is zero; the
-          // phi at the point of cloest approach is exactly the phi of the truth
-          // particle
-          CHECK_CLOSE_ABS(estPartialParams[eBoundLoc0], 0., 1e-5);
-          CHECK_CLOSE_ABS(estPartialParams[eBoundPhi], phi, 1e-5);
-          CHECK_CLOSE_ABS(estPartialParams[eBoundQOverP], rho, 1e-4);
-          // The loc1, theta and time are set to zero in the estimator
-          CHECK_CLOSE_ABS(estPartialParams[eBoundLoc1], 0., 1e-10);
-          CHECK_CLOSE_ABS(estPartialParams[eBoundTheta], 0., 1e-10);
-          CHECK_CLOSE_ABS(estPartialParams[eBoundTime], 0., 1e-10);
-
-          // Test the full track parameters estimator
-          auto fullParamsOpt = estimateTrackParamsFromSeed(
-              geoCtx, spacePointPtrs.begin(), spacePointPtrs.end(),
-              *bottomSurface, Vector3(0, 0, 2._T), 0.1_T);
-          BOOST_REQUIRE(fullParamsOpt.has_value());
-          const auto& estFullParams = fullParamsOpt.value();
+          // Test the bound track parameters estimator
+          auto estFullParamsResult = estimateTrackParamsFromSeed(
+              geoCtx, spacePointPtrs, *bottomSurface, bField);
+          BOOST_CHECK(estFullParamsResult.ok());
+          const auto& estFullParams = estFullParamsResult.value();
           BOOST_TEST_INFO(
               "The estimated full track parameters at the bottom space point: "
               "\n"
@@ -198,7 +193,8 @@ BOOST_AUTO_TEST_CASE(trackparameters_estimation_test) {
                           1e-2);
           CHECK_CLOSE_ABS(estFullParams[eBoundQOverP], expParams[eBoundQOverP],
                           1e-2);
-          CHECK_CLOSE_ABS(estFullParams[eBoundTime], expParams[eBoundTime], 1.);
+          // time is not estimated so we check if it is default zero
+          CHECK_CLOSE_ABS(estFullParams[eBoundTime], 0, 1e-6);
         }
       }
     }

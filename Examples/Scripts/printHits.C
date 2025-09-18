@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <TTreeReader.h>
 #include <TTreeReaderValue.h>
@@ -139,8 +139,8 @@ printHits(std::string inFile,
       }
       Sens_zx->Fill(z->at(j), x->at(j), sens->at(j));
       Sens_zy->Fill(z->at(j), y->at(j), sens->at(j));
-      Sens_zr->Fill(z->at(j), sqrt(x->at(j) * x->at(j) + y->at(j) * y->at(j)));
-      Full_zr->Fill(z->at(j), sqrt(x->at(j) * x->at(j) + y->at(j) * y->at(j)));
+      Sens_zr->Fill(z->at(j), std::hypot(x->at(j), y->at(j)));
+      Full_zr->Fill(z->at(j), std::hypot(x->at(j), y->at(j)));
 
       // boundaries
       if (tree->FindBranch("boundary")) {
@@ -149,7 +149,7 @@ printHits(std::string inFile,
         Bounds_zx->Fill(z->at(j), x->at(j), bounds->at(j));
         Bounds_zy->Fill(z->at(j), y->at(j), bounds->at(j));
         Bounds_zr->Fill(z->at(j),
-                        sqrt(x->at(j) * x->at(j) + y->at(j) * y->at(j)),
+                        std::hypot(x->at(j), y->at(j)),
                         bounds->at(j));
       }
       // material
@@ -159,7 +159,7 @@ printHits(std::string inFile,
         Mat_zx->Fill(z->at(j), x->at(j), mat->at(j));
         Mat_zy->Fill(z->at(j), y->at(j), mat->at(j));
         Mat_zr->Fill(z->at(j),
-                     sqrt(x->at(j) * x->at(j) + y->at(j) * y->at(j)),
+                     std::hypot(x->at(j), y->at(j)),
                      mat->at(j));
       }
     }

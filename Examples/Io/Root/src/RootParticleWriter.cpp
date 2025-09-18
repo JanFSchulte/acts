@@ -1,17 +1,22 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Io/Root/RootParticleWriter.hpp"
 
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/Utilities/Helpers.hpp"
+#include "Acts/Utilities/VectorHelpers.hpp"
+#include "ActsExamples/EventData/SimParticle.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
 
+#include <cstdint>
 #include <ios>
+#include <ostream>
 #include <stdexcept>
 
 #include <TFile.h>
@@ -63,6 +68,12 @@ ActsExamples::RootParticleWriter::RootParticleWriter(
   m_outputTree->Branch("particle", &m_particle);
   m_outputTree->Branch("generation", &m_generation);
   m_outputTree->Branch("sub_particle", &m_subParticle);
+
+  m_outputTree->Branch("e_loss", &m_eLoss);
+  m_outputTree->Branch("total_x0", &m_pathInX0);
+  m_outputTree->Branch("total_l0", &m_pathInL0);
+  m_outputTree->Branch("number_of_hits", &m_numberOfHits);
+  m_outputTree->Branch("outcome", &m_outcome);
 }
 
 ActsExamples::RootParticleWriter::~RootParticleWriter() {
@@ -71,7 +82,7 @@ ActsExamples::RootParticleWriter::~RootParticleWriter() {
   }
 }
 
-ActsExamples::ProcessCode ActsExamples::RootParticleWriter::endRun() {
+ActsExamples::ProcessCode ActsExamples::RootParticleWriter::finalize() {
   m_outputFile->cd();
   m_outputTree->Write();
   m_outputFile->Close();
@@ -91,31 +102,54 @@ ActsExamples::ProcessCode ActsExamples::RootParticleWriter::writeT(
   for (const auto& particle : particles) {
     m_particleId.push_back(particle.particleId().value());
     m_particleType.push_back(particle.pdg());
-    m_process.push_back(static_cast<uint32_t>(particle.process()));
+    m_process.push_back(static_cast<std::uint32_t>(particle.process()));
     // position
-    m_vx.push_back(particle.fourPosition().x() / Acts::UnitConstants::mm);
-    m_vy.push_back(particle.fourPosition().y() / Acts::UnitConstants::mm);
-    m_vz.push_back(particle.fourPosition().z() / Acts::UnitConstants::mm);
-    m_vt.push_back(particle.fourPosition().w() / Acts::UnitConstants::ns);
+    m_vx.push_back(Acts::clampValue<float>(particle.fourPosition().x() /
+                                           Acts::UnitConstants::mm));
+    m_vy.push_back(Acts::clampValue<float>(particle.fourPosition().y() /
+                                           Acts::UnitConstants::mm));
+    m_vz.push_back(Acts::clampValue<float>(particle.fourPosition().z() /
+                                           Acts::UnitConstants::mm));
+    m_vt.push_back(Acts::clampValue<float>(particle.fourPosition().w() /
+                                           Acts::UnitConstants::mm));
     // momentum
     const auto p = particle.absoluteMomentum() / Acts::UnitConstants::GeV;
-    m_p.push_back(p);
-    m_px.push_back(p * particle.unitDirection().x());
-    m_py.push_back(p * particle.unitDirection().y());
-    m_pz.push_back(p * particle.unitDirection().z());
+    m_p.push_back(Acts::clampValue<float>(p));
+    m_px.push_back(Acts::clampValue<float>(p * particle.direction().x()));
+    m_py.push_back(Acts::clampValue<float>(p * particle.direction().y()));
+    m_pz.push_back(Acts::clampValue<float>(p * particle.direction().z()));
+
     // particle constants
-    m_m.push_back(particle.mass() / Acts::UnitConstants::GeV);
-    m_q.push_back(particle.charge() / Acts::UnitConstants::e);
+    if (!std::isfinite(particle.mass()) || !std::isfinite(particle.charge())) {
+      ACTS_WARNING("Particle mass or charge is not finite, can't write it");
+    }
+
+    m_m.push_back(
+        Acts::clampValue<float>(particle.mass() / Acts::UnitConstants::GeV));
+    m_q.push_back(
+        Acts::clampValue<float>(particle.charge() / Acts::UnitConstants::e));
     // derived kinematic quantities
-    m_eta.push_back(Acts::VectorHelpers::eta(particle.unitDirection()));
-    m_phi.push_back(Acts::VectorHelpers::phi(particle.unitDirection()));
-    m_pt.push_back(p * Acts::VectorHelpers::perp(particle.unitDirection()));
+    m_eta.push_back(Acts::clampValue<float>(
+        Acts::VectorHelpers::eta(particle.direction())));
+    m_phi.push_back(Acts::clampValue<float>(
+        Acts::VectorHelpers::phi(particle.direction())));
+    m_pt.push_back(Acts::clampValue<float>(
+        p * Acts::VectorHelpers::perp(particle.direction())));
     // decoded barcode components
     m_vertexPrimary.push_back(particle.particleId().vertexPrimary());
     m_vertexSecondary.push_back(particle.particleId().vertexSecondary());
     m_particle.push_back(particle.particleId().particle());
     m_generation.push_back(particle.particleId().generation());
     m_subParticle.push_back(particle.particleId().subParticle());
+
+    m_eLoss.push_back(Acts::clampValue<float>(particle.energyLoss() /
+                                              Acts::UnitConstants::GeV));
+    m_pathInX0.push_back(
+        Acts::clampValue<float>(particle.pathInX0() / Acts::UnitConstants::mm));
+    m_pathInL0.push_back(
+        Acts::clampValue<float>(particle.pathInL0() / Acts::UnitConstants::mm));
+    m_numberOfHits.push_back(particle.numberOfHits());
+    m_outcome.push_back(static_cast<std::uint32_t>(particle.outcome()));
   }
 
   m_outputTree->Fill();
@@ -141,6 +175,11 @@ ActsExamples::ProcessCode ActsExamples::RootParticleWriter::writeT(
   m_particle.clear();
   m_generation.clear();
   m_subParticle.clear();
+  m_eLoss.clear();
+  m_numberOfHits.clear();
+  m_outcome.clear();
+  m_pathInX0.clear();
+  m_pathInL0.clear();
 
   return ProcessCode::SUCCESS;
 }

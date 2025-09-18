@@ -1,45 +1,37 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Plugins/ActSVG/LayerSvgConverter.hpp"
 
 #include "Acts/Geometry/Layer.hpp"
 #include "Acts/Plugins/ActSVG/SurfaceArraySvgConverter.hpp"
 #include "Acts/Plugins/ActSVG/SurfaceSvgConverter.hpp"
-#include "Acts/Utilities/Logger.hpp"
-
-#include <set>
-#include <sstream>
+#include "Acts/Surfaces/SurfaceArray.hpp"
 
 std::vector<actsvg::svg::object> Acts::Svg::LayerConverter::convert(
     const GeometryContext& gctx, const Layer& layer,
     const LayerConverter::Options& cOptions) {
-  // The local logger
-  ACTS_LOCAL_LOGGER(getDefaultLogger("LayerSvgConverter", cOptions.logLevel));
-
   // The sheets
   std::vector<actsvg::svg::object> sheets;
 
   // The volume
   Acts::Svg::ProtoVolume volume;
   volume._name = cOptions.name;
-  ACTS_DEBUG("Processing layer: " << cOptions.name);
 
   /// Convert the surface array into proto surfaces and a grid structure
   if (layer.surfaceArray() != nullptr) {
     SurfaceArrayConverter::Options sacOptions;
     sacOptions.surfaceStyles = cOptions.surfaceStyles;
-    sacOptions.logLevel = cOptions.logLevel;
     auto [surfaces, grid, associations] = SurfaceArrayConverter::convert(
         gctx, *(layer.surfaceArray()), sacOptions);
-    volume._surfaces = surfaces;
+    volume._surfaces = {surfaces};
     volume._surface_grid = grid;
-    volume._grid_associations = associations;
+    volume._grid_associations = {associations};
   }
 
   // The sheet
@@ -87,27 +79,28 @@ std::vector<actsvg::svg::object> Acts::Svg::LayerConverter::convert(
     zr_layer._id = cOptions.name + "_zr_view";
     unsigned int m = 0;
     // Potential labels
-    Acts::ActsScalar avgRadius = 0.;
+    double avgRadius = 0.;
 
     for (const auto& sf : layer.surfaceArray()->surfaces()) {
       // Surface center
-      const Acts::Vector3 rCenter = sf->binningPosition(gctx, Acts::binR);
+      const Acts::Vector3 rCenter =
+          sf->referencePosition(gctx, Acts::AxisDirection::AxisR);
       const Acts::Vector3 sfCenter = sf->center(gctx);
-      Acts::ActsScalar radius = Acts::VectorHelpers::perp(rCenter);
-      Acts::ActsScalar phi = Acts::VectorHelpers::phi(rCenter);
-      Acts::ActsScalar z = sfCenter.z();
+      double radius = Acts::VectorHelpers::perp(rCenter);
+      double phi = Acts::VectorHelpers::phi(rCenter);
+      double z = sfCenter.z();
       // Get the average radius
       avgRadius += radius;
-      // Raw display surfaces for projects
+      // Raw display surfaces for projections
       actsvg::proto::surface<std::vector<Acts::Vector3>> projSurface;
       projSurface._vertices = sf->polyhedronRepresentation(gctx, 1u).vertices;
       // Draw only if they fall into the range restriction - for phi
-      if (phi >= cOptions.phiRange[0] and phi <= cOptions.phiRange[1]) {
+      if (phi >= cOptions.phiRange[0] && phi <= cOptions.phiRange[1]) {
         std::string m_zr_id = std::string("zr_") + std::to_string(m++);
         zr_layer.add_object(Acts::Svg::View::zr(projSurface, m_zr_id));
       }
       // for z
-      if (z >= cOptions.zRange[0] and z <= cOptions.zRange[1]) {
+      if (z >= cOptions.zRange[0] && z <= cOptions.zRange[1]) {
         std::string m_xy_id = std::string("xy_") + std::to_string(m++);
         xy_layer.add_object(Acts::Svg::View::xy(projSurface, m_xy_id));
       }
@@ -117,8 +110,8 @@ std::vector<actsvg::svg::object> Acts::Svg::LayerConverter::convert(
 
     // Add a measure iuf requested
     if (cOptions.labelProjection) {
-      ActsScalar xEnd = avgRadius * std::cos(cOptions.labelGauge);
-      ActsScalar yEnd = avgRadius * std::sin(cOptions.labelGauge);
+      double xEnd = avgRadius * std::cos(cOptions.labelGauge);
+      double yEnd = avgRadius * std::sin(cOptions.labelGauge);
       xy_layer.add_object(measure(0., 0., xEnd, yEnd, "r", avgRadius, "mm"));
     }
   }

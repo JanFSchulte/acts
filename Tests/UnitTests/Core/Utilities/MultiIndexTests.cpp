@@ -1,25 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#include <boost/test/tools/old/interface.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Utilities/MultiIndex.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
-#include <type_traits>
 #include <unordered_set>
 
 #include <boost/mpl/list.hpp>
 
-// 32bit split into a three level hierachy.
-using Index32 = Acts::MultiIndex<uint32_t, 16, 8, 8>;
-// 64bit split into a four level hierachy
-using Index64 = Acts::MultiIndex<uint64_t, 13, 17, 21, 13>;
+// 32bit split into a three level hierarchy.
+using Index32 = Acts::MultiIndex<std::uint32_t, 16, 8, 8>;
+// 64bit split into a four level hierarchy
+using Index64 = Acts::MultiIndex<std::uint64_t, 13, 17, 21, 13>;
 using Indices = boost::mpl::list<Index32, Index64>;
 
 BOOST_AUTO_TEST_CASE_TEMPLATE(triviality, T, Indices) {
@@ -43,14 +45,6 @@ BOOST_AUTO_TEST_CASE(index32_construct) {
     BOOST_CHECK_EQUAL(idx.level(1), 0x24u);
     BOOST_CHECK_EQUAL(idx.level(2), 0x00u);
   }
-  // assign from encoded value
-  {
-    Index32 idx = 0xabcd2400u;
-    BOOST_CHECK_EQUAL(idx.value(), 0xabcd2400u);
-    BOOST_CHECK_EQUAL(idx.level(0), 0xabcdu);
-    BOOST_CHECK_EQUAL(idx.level(1), 0x24u);
-    BOOST_CHECK_EQUAL(idx.level(2), 0x00u);
-  }
 }
 
 BOOST_AUTO_TEST_CASE(index32_set) {
@@ -62,11 +56,7 @@ BOOST_AUTO_TEST_CASE(index32_set) {
   BOOST_CHECK_EQUAL(idx.level(1), 0u);
   BOOST_CHECK_EQUAL(idx.level(2), 0u);
   // set a specific level outside the valid range, should be truncated
-  idx.set(2, 0xfff);
-  BOOST_CHECK_EQUAL(idx.value(), 0x001800ffu);
-  BOOST_CHECK_EQUAL(idx.level(0), 24u);
-  BOOST_CHECK_EQUAL(idx.level(1), 0u);
-  BOOST_CHECK_EQUAL(idx.level(2), 255u);
+  BOOST_CHECK_THROW(idx.set(2, 0xfff), std::out_of_range);
 }
 
 BOOST_AUTO_TEST_CASE(index32_set_overflow) {
@@ -79,8 +69,8 @@ BOOST_AUTO_TEST_CASE(index32_set_overflow) {
   // check that values above max are truncated
   std::size_t lvl = 0;
   for (auto maxValue : maxValues) {
-    BOOST_CHECK_EQUAL(Index32::Zeros().set(lvl, maxValue + 1),
-                      Index32::Zeros().set(lvl, 0u));
+    BOOST_CHECK_THROW(Index32::Zeros().set(lvl, maxValue + 1),
+                      std::out_of_range);
     lvl += 1;
   }
 }
@@ -96,8 +86,8 @@ BOOST_AUTO_TEST_CASE(index64_set_overflow) {
   // check that values above max are truncated
   std::size_t lvl = 0;
   for (auto maxValue : maxValues) {
-    BOOST_CHECK_EQUAL(Index64::Zeros().set(lvl, maxValue + 1),
-                      Index64::Zeros().set(lvl, 0u));
+    BOOST_CHECK_THROW(Index64::Zeros().set(lvl, maxValue + 1),
+                      std::out_of_range);
     lvl += 1;
   }
 }
@@ -210,12 +200,12 @@ BOOST_AUTO_TEST_CASE(index32_as_key) {
   set.emplace(Index32::Encode(1u, 3u, 4u));
   set.emplace(Index32::Encode(2u));
 
-  BOOST_CHECK(not set.count(Index32(0u)));
-  BOOST_CHECK(not set.count(Index32(UINT32_MAX)));
+  BOOST_CHECK(!set.count(Index32(0u)));
+  BOOST_CHECK(!set.count(Index32(std::numeric_limits<std::uint32_t>::max())));
   BOOST_CHECK_EQUAL(set.size(), 3);
-  // automatically converts encoded value to MultiIndex
-  BOOST_CHECK(set.count(0x00010204u));
-  BOOST_CHECK(set.count(0x00010304u));
+  // Does not automatically convert encoded value to MultiIndex
+  BOOST_CHECK(set.count(Index32{0x00010204u}));
+  BOOST_CHECK(set.count(Index32{0x00010304u}));
   BOOST_CHECK(set.count(Index32::Encode(2u)));
 }
 
@@ -228,7 +218,7 @@ BOOST_AUTO_TEST_CASE(index64_as_key) {
   set.emplace(Index64::Encode(2u, 0u, 0u, 0u));
   set.emplace(Index64::Encode(2u, 1u));
 
-  BOOST_CHECK(not set.count(Index64(0u)));
-  BOOST_CHECK(not set.count(Index64(UINT64_MAX)));
+  BOOST_CHECK(!set.count(Index64(0u)));
+  BOOST_CHECK(!set.count(Index64(std::numeric_limits<std::uint64_t>::max())));
   BOOST_CHECK_EQUAL(set.size(), 3);
 }

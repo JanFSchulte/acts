@@ -1,238 +1,341 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
-#include "Acts/Geometry/BoundarySurfaceT.hpp"
+#include "Acts/Definitions/Direction.hpp"
+#include "Acts/Definitions/Units.hpp"
 #include "Acts/Geometry/Layer.hpp"
 #include "Acts/Geometry/TrackingGeometry.hpp"
 #include "Acts/Geometry/TrackingVolume.hpp"
-#include "Acts/Propagator/ConstrainedStep.hpp"
-#include "Acts/Propagator/Propagator.hpp"
+#include "Acts/Propagator/NavigationTarget.hpp"
+#include "Acts/Propagator/NavigatorOptions.hpp"
+#include "Acts/Propagator/NavigatorStatistics.hpp"
+#include "Acts/Surfaces/BoundaryTolerance.hpp"
 #include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Utilities/Intersection.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "Acts/Utilities/Result.hpp"
 
-#include <iomanip>
-#include <iterator>
-#include <sstream>
-#include <string>
-
-#include <boost/algorithm/string.hpp>
+#include <limits>
+#include <memory>
+#include <vector>
 
 namespace Acts {
 
-/// DirectNavigator class
+/// @brief A fully guided navigator
 ///
-/// This is a fully guided navigator that progresses through
-/// a pre-given sequence of surfaces.
+/// This is a fully guided navigator that progresses through a provided sequence
+/// of surfaces.
 ///
-/// This can either be used as a validation tool, for truth
-/// tracking, or track refitting
+/// This can either be used as a validation tool, for truth tracking, or track
+/// refitting.
+///
 class DirectNavigator {
  public:
   /// The sequentially crossed surfaces
   using SurfaceSequence = std::vector<const Surface*>;
-  using SurfaceIter = std::vector<const Surface*>::iterator;
 
-  /// Defaulted Constructed
-  DirectNavigator() = default;
+  /// @brief The nested configuration struct
+  struct Config {};
 
-  /// The tolerance used to define "surface reached"
-  double tolerance = s_onSurfaceTolerance;
+  /// @brief The nested options struct
+  struct Options : public NavigatorPlainOptions {
+    explicit Options(const GeometryContext& gctx)
+        : NavigatorPlainOptions(gctx) {}
 
-  /// Nested Actor struct, called Initializer
-  ///
-  /// This is needed for the initialization of the
-  /// surface sequence
-  struct Initializer {
     /// The Surface sequence
-    SurfaceSequence navSurfaces = {};
+    SurfaceSequence surfaces;
 
-    /// Actor result / state
-    struct this_result {
-      bool initialized = false;
-    };
-    using result_type = this_result;
+    /// The surface tolerance
+    double surfaceTolerance = s_onSurfaceTolerance;
 
-    /// Defaulting the constructor
-    Initializer() = default;
+    // TODO https://github.com/acts-project/acts/issues/2738
+    /// Distance limit to discard intersections "behind us"
+    /// @note this is only necessary because some surfaces have more than one
+    ///       intersection
+    double nearLimit = -100 * UnitConstants::um;
 
-    /// Actor operator call
-    /// @tparam statet Type of the full propagator state
-    /// @tparam stepper_t Type of the stepper
-    ///
-    /// @param state the entire propagator state
-    /// @param r the result of this Actor
-    template <typename propagator_state_t, typename stepper_t>
-    void operator()(propagator_state_t& state, const stepper_t& /*unused*/,
-                    result_type& r) const {
-      // Only act once
-      if (not r.initialized) {
-        // Initialize the surface sequence
-        state.navigation.navSurfaces = navSurfaces;
-        state.navigation.navSurfaceIter = state.navigation.navSurfaces.begin();
-        r.initialized = true;
-      }
+    /// The far limit to resolve surfaces
+    double farLimit = std::numeric_limits<double>::max();
+
+    void setPlainOptions(const NavigatorPlainOptions& options) {
+      static_cast<NavigatorPlainOptions&>(*this) = options;
     }
-
-    /// Actor operator call - resultless, unused
-    template <typename propagator_state_t, typename stepper_t>
-    void operator()(propagator_state_t& /*unused*/,
-                    const stepper_t& /*unused*/) const {}
   };
 
-  /// Nested State struct
+  /// @brief Nested State struct
   ///
-  /// It acts as an internal state which is
-  /// created for every propagation/extrapolation step
-  /// and keep thread-local navigation information
+  /// It acts as an internal state which is created for every
+  /// propagation/extrapolation step and keep thread-local navigation
+  /// information
   struct State {
-    /// Externally provided surfaces - expected to be ordered
-    /// along the path
-    SurfaceSequence navSurfaces = {};
+    explicit State(const Options& options_) : options(options_) {}
 
-    /// Iterator the next surface
-    SurfaceIter navSurfaceIter = navSurfaces.begin();
+    Options options;
 
-    /// Navigation state - external interface: the start surface
-    const Surface* startSurface = nullptr;
+    Direction direction = Direction::Forward();
+
+    /// Index of the next surface to try
+    /// @note -1 means before the first surface in the sequence and size()
+    ///       means after the last surface in the sequence
+    int surfaceIndex = -1;
+
     /// Navigation state - external interface: the current surface
     const Surface* currentSurface = nullptr;
-    /// Navigation state - external interface: the target surface
-    const Surface* targetSurface = nullptr;
-    /// Navigation state - starting layer
-    const Layer* startLayer = nullptr;
-    /// Navigation state - target layer
-    const Layer* targetLayer = nullptr;
-    /// Navigation state: the start volume
-    const TrackingVolume* startVolume = nullptr;
-    /// Navigation state: the current volume
-    const TrackingVolume* currentVolume = nullptr;
-    /// Navigation state: the target volume
-    const TrackingVolume* targetVolume = nullptr;
 
-    /// Navigation state - external interface: target is reached
-    bool targetReached = false;
     /// Navigation state - external interface: a break has been detected
     bool navigationBreak = false;
 
-    /// Reset state
-    ///
-    /// @param ssurface is the new starting surface
-    /// @param tsurface is the target surface
-    void reset(const GeometryContext& /*geoContext*/, const Vector3& /*pos*/,
-               const Vector3& /*dir*/, NavigationDirection /*navDir*/,
-               const Surface* ssurface, const Surface* tsurface) {
-      // Reset everything except the navSurfaces
-      State newState = State();
-      newState.navSurfaces = this->navSurfaces;
-      *this = newState;
+    /// Navigation statistics
+    NavigatorStatistics statistics;
 
-      // Reset others
-      navSurfaceIter =
-          std::find(navSurfaces.begin(), navSurfaces.end(), ssurface);
-      startSurface = ssurface;
-      currentSurface = ssurface;
-      targetSurface = tsurface;
+    const Surface& navSurface() const {
+      return *options.surfaces.at(surfaceIndex);
+    }
+
+    void nextSurface() {
+      if (direction == Direction::Forward()) {
+        ++surfaceIndex;
+      } else {
+        --surfaceIndex;
+      }
+    }
+
+    bool endOfSurfaces() const {
+      if (direction == Direction::Forward()) {
+        return surfaceIndex >= static_cast<int>(options.surfaces.size());
+      }
+      return surfaceIndex < 0;
+    }
+
+    int remainingSurfaces() const {
+      if (direction == Direction::Forward()) {
+        return options.surfaces.size() - surfaceIndex;
+      }
+      return surfaceIndex + 1;
+    }
+
+    void resetSurfaceIndex() {
+      surfaceIndex = direction == Direction::Forward()
+                         ? -1
+                         : static_cast<int>(options.surfaces.size());
     }
   };
 
-  /// @brief Navigator status call
-  ///
-  /// @tparam propagator_state_t is the type of Propagatgor state
-  /// @tparam stepper_t is the used type of the Stepper by the Propagator
-  ///
-  /// @param [in,out] state is the mutable propagator state object
-  /// @param [in] stepper Stepper in use
-  template <typename propagator_state_t, typename stepper_t>
-  void status(propagator_state_t& state, const stepper_t& stepper) const {
-    const auto& logger = state.options.logger;
-    // Screen output
-    ACTS_VERBOSE("Entering navigator::status.");
+  explicit DirectNavigator(std::unique_ptr<const Logger> _logger =
+                               getDefaultLogger("DirectNavigator",
+                                                Logging::INFO))
+      : m_logger{std::move(_logger)} {}
 
-    // Navigator status always resets the current surface
-    state.navigation.currentSurface = nullptr;
-    // Output the position in the sequence
-    ACTS_VERBOSE(std::distance(state.navigation.navSurfaceIter,
-                               state.navigation.navSurfaces.end())
-                 << " out of " << state.navigation.navSurfaces.size()
-                 << " surfaces remain to try.");
-
-    // Check if we are on surface
-    if (state.navigation.navSurfaceIter != state.navigation.navSurfaces.end()) {
-      // Establish the surface status
-      auto surfaceStatus = stepper.updateSurfaceStatus(
-          state.stepping, **state.navigation.navSurfaceIter, false);
-      if (surfaceStatus == Intersection3D::Status::onSurface) {
-        // Set the current surface
-        state.navigation.currentSurface = *state.navigation.navSurfaceIter;
-        ACTS_VERBOSE("Current surface set to  "
-                     << state.navigation.currentSurface->geometryId())
-        // Move the sequence to the next surface
-        ++state.navigation.navSurfaceIter;
-        if (state.navigation.navSurfaceIter !=
-            state.navigation.navSurfaces.end()) {
-          ACTS_VERBOSE("Next surface candidate is  "
-                       << (*state.navigation.navSurfaceIter)->geometryId());
-          stepper.releaseStepSize(state.stepping);
-        }
-      } else if (surfaceStatus == Intersection3D::Status::reachable) {
-        ACTS_VERBOSE("Next surface reachable at distance  "
-                     << stepper.outputStepSize(state.stepping));
-      }
-    }
+  State makeState(const Options& options) const {
+    State state(options);
+    return state;
   }
 
-  /// @brief Navigator target call
-  ///
-  /// @tparam propagator_state_t is the type of Propagatgor state
-  /// @tparam stepper_t is the used type of the Stepper by the Propagator
-  ///
-  /// @param [in,out] state is the mutable propagator state object
-  /// @param [in] stepper Stepper in use
-  template <typename propagator_state_t, typename stepper_t>
-  void target(propagator_state_t& state, const stepper_t& stepper) const {
-    const auto& logger = state.options.logger;
-    // Screen output
-    ACTS_VERBOSE("Entering navigator::target.");
+  const Surface* currentSurface(const State& state) const {
+    return state.currentSurface;
+  }
 
-    // Navigator target always resets the current surface
-    state.navigation.currentSurface = nullptr;
-    // Output the position in the sequence
-    ACTS_VERBOSE(std::distance(state.navigation.navSurfaceIter,
-                               state.navigation.navSurfaces.end())
-                 << " out of " << state.navigation.navSurfaces.size()
-                 << " surfaces remain to try.");
+  const TrackingVolume* currentVolume(const State& /*state*/) const {
+    return nullptr;
+  }
 
-    if (state.navigation.navSurfaceIter != state.navigation.navSurfaces.end()) {
-      // Establish & update the surface status
-      auto surfaceStatus = stepper.updateSurfaceStatus(
-          state.stepping, **state.navigation.navSurfaceIter, false);
-      if (surfaceStatus == Intersection3D::Status::unreachable) {
-        ACTS_VERBOSE(
-            "Surface not reachable anymore, switching to next one in "
-            "sequence");
-        // Move the sequence to the next surface
-        ++state.navigation.navSurfaceIter;
-      } else {
-        ACTS_VERBOSE("Navigation stepSize set to "
-                     << stepper.outputStepSize(state.stepping));
-      }
+  const IVolumeMaterial* currentVolumeMaterial(const State& /*state*/) const {
+    return nullptr;
+  }
+
+  const Surface* startSurface(const State& state) const {
+    return state.options.startSurface;
+  }
+
+  const Surface* targetSurface(const State& state) const {
+    return state.options.targetSurface;
+  }
+
+  bool endOfWorldReached(State& /*state*/) const { return false; }
+
+  bool navigationBreak(const State& state) const {
+    return state.navigationBreak;
+  }
+
+  /// @brief Initialize the navigator
+  ///
+  /// This function initializes the navigator for a new propagation.
+  ///
+  /// @param state The navigation state
+  /// @param position The start position
+  /// @param direction The start direction
+  /// @param propagationDirection The propagation direction
+  [[nodiscard]] Result<void> initialize(State& state, const Vector3& position,
+                                        const Vector3& direction,
+                                        Direction propagationDirection) const {
+    (void)position;
+    (void)direction;
+
+    ACTS_VERBOSE("Initialize. Surface sequence for navigation:");
+    for (const Surface* surface : state.options.surfaces) {
+      ACTS_VERBOSE(surface->geometryId()
+                   << " - "
+                   << surface->center(state.options.geoContext).transpose());
+    }
+
+    state.direction = propagationDirection;
+    ACTS_VERBOSE("Navigation direction is " << propagationDirection);
+
+    // We set the current surface to the start surface
+    state.currentSurface = state.options.startSurface;
+    if (state.currentSurface != nullptr) {
+      ACTS_VERBOSE("Current surface set to start surface "
+                   << state.currentSurface->geometryId());
     } else {
-      // Set the navigation break
-      state.navigation.navigationBreak = true;
-      // If no externally provided target is given, the target is reached
-      if (state.navigation.targetSurface == nullptr) {
-        state.navigation.targetReached = true;
-        // Announce it then
-        ACTS_VERBOSE("No target Surface, job done.");
+      ACTS_VERBOSE("Current surface set to nullptr");
+    }
+
+    // Find initial index.
+    auto found =
+        std::ranges::find(state.options.surfaces, state.options.startSurface);
+
+    if (found != state.options.surfaces.end()) {
+      // The index should be the index before the start surface, depending on
+      // the direction
+      state.surfaceIndex = std::distance(state.options.surfaces.begin(), found);
+      state.surfaceIndex += state.direction == Direction::Backward() ? 1 : -1;
+    } else {
+      ACTS_DEBUG(
+          "Did not find the start surface in the sequence. Assuming it is not "
+          "part of the sequence. Trusting the correctness of the input "
+          "sequence. Resetting the surface index.");
+      state.resetSurfaceIndex();
+    }
+
+    state.navigationBreak = false;
+
+    return Result<void>::success();
+  }
+
+  /// @brief Get the next target surface
+  ///
+  /// This function gets the next target surface for the propagation. For
+  /// the direct navigator this is always the next surface in the sequence.
+  ///
+  /// @param state The navigation state
+  /// @param position The current position
+  /// @param direction The current direction
+  ///
+  /// @return The next target surface
+  NavigationTarget nextTarget(State& state, const Vector3& position,
+                              const Vector3& direction) const {
+    // Navigator target always resets the current surface
+    state.currentSurface = nullptr;
+
+    if (state.navigationBreak) {
+      return NavigationTarget::None();
+    }
+
+    ACTS_VERBOSE("DirectNavigator::nextTarget");
+
+    // Move the sequence to the next surface
+    state.nextSurface();
+
+    if (!state.endOfSurfaces()) {
+      ACTS_VERBOSE("Next surface candidate is  "
+                   << state.navSurface().geometryId() << ". "
+                   << state.remainingSurfaces() << " out of "
+                   << state.options.surfaces.size()
+                   << " surfaces remain to try.");
+    } else {
+      ACTS_VERBOSE("End of surfaces reached, navigation break.");
+      state.navigationBreak = true;
+      return NavigationTarget::None();
+    }
+
+    // Establish & update the surface status
+    // TODO we do not know the intersection index - passing the closer one
+    const Surface& surface = state.navSurface();
+    const double farLimit = std::numeric_limits<double>::max();
+    const auto intersection = chooseIntersection(
+        state.options.geoContext, surface, position, direction,
+        BoundaryTolerance::Infinite(), state.options.nearLimit, farLimit,
+        state.options.surfaceTolerance);
+    return NavigationTarget(surface, intersection.index(),
+                            BoundaryTolerance::Infinite());
+  }
+
+  /// @brief Check if the current target is still valid
+  ///
+  /// This function checks if the target is valid. For the direct navigator this
+  /// is always true.
+  ///
+  /// @param state The navigation state
+  /// @param position The current position
+  /// @param direction The current direction
+  ///
+  /// @return True if the target is valid
+  bool checkTargetValid(const State& state, const Vector3& position,
+                        const Vector3& direction) const {
+    (void)state;
+    (void)position;
+    (void)direction;
+
+    return true;
+  }
+
+  /// @brief Handle the surface reached
+  ///
+  /// This function handles the surface reached. For the direct navigator this
+  /// effectively sets the current surface to the reached surface.
+  ///
+  /// @param state The navigation state
+  /// @param position The current position
+  /// @param direction The current direction
+  /// @param surface The surface reached
+  void handleSurfaceReached(State& state, const Vector3& position,
+                            const Vector3& direction,
+                            const Surface& surface) const {
+    (void)position;
+    (void)direction;
+    (void)surface;
+
+    if (state.navigationBreak) {
+      return;
+    }
+
+    ACTS_VERBOSE("DirectNavigator::handleSurfaceReached");
+
+    // Set the current surface
+    state.currentSurface = &state.navSurface();
+    ACTS_VERBOSE("Current surface set to  "
+                 << state.currentSurface->geometryId());
+  }
+
+ private:
+  SurfaceIntersection chooseIntersection(
+      const GeometryContext& gctx, const Surface& surface,
+      const Vector3& position, const Vector3& direction,
+      const BoundaryTolerance& boundaryTolerance, double nearLimit,
+      double farLimit, double tolerance) const {
+    auto intersections = surface.intersect(gctx, position, direction,
+                                           boundaryTolerance, tolerance);
+
+    for (auto& intersection : intersections.split()) {
+      if (detail::checkPathLength(intersection.pathLength(), nearLimit,
+                                  farLimit, logger())) {
+        return intersection;
       }
     }
+
+    return SurfaceIntersection::invalid();
   }
+
+  const Logger& logger() const { return *m_logger; }
+
+  std::unique_ptr<const Logger> m_logger;
 };
 
 }  // namespace Acts

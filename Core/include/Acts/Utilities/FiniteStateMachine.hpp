@@ -1,14 +1,12 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
-
-#include "Acts/Utilities/TypeTraits.hpp"
 
 #include <optional>
 #include <string_view>
@@ -19,10 +17,10 @@ namespace Acts {
 /// Implementation of a finite state machine engine
 ///
 /// Allows setting up a system of states and transitions between them. States
-/// are definedd as empty structs (footprint: 1 byte). Tranitions call functions
-/// using overload resolution. This works by subclassing this class, providing
-/// the deriving type as the first template argument (CRTP) and providing
-/// methods like
+/// are definedd as empty structs (footprint: 1 byte). Transitions call
+/// functions using overload resolution. This works by subclassing this class,
+/// providing the deriving type as the first template argument (CRTP) and
+/// providing methods like
 ///
 /// ```cpp
 /// event_return on_event(const S&, const E&);
@@ -121,12 +119,11 @@ class FiniteStateMachine {
   /// Default constructor. The default state is taken to be the first in the
   /// `States` template arguments
   FiniteStateMachine()
-      : m_state(
-            typename std::tuple_element<0, std::tuple<States...>>::type{}){};
+      : m_state(typename std::tuple_element_t<0, std::tuple<States...>>{}) {}
 
   /// Constructor from an explicit state. The FSM is initialized to this state.
   /// @param state Initial state for the FSM.
-  FiniteStateMachine(StateVariant state) : m_state(std::move(state)){};
+  explicit FiniteStateMachine(StateVariant state) : m_state(std::move(state)) {}
 
   /// Get the current state of the FSM (as a variant).
   /// @return StateVariant The current state of the FSM.
@@ -155,11 +152,9 @@ class FiniteStateMachine {
 
   /// Returns whether the FSM is in the specified state
   /// @tparam State type to check against
-  /// @param state State instance to check against
   /// @return Whether the FSM is in the given state.
   template <typename S>
-  bool is(const S& state) const noexcept {
-    (void)state;
+  bool is(const S& /*state*/) const noexcept {
     return is<S>();
   }
 

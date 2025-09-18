@@ -1,26 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Io/Csv/CsvSpacePointReader.hpp"
 
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/EventData/SourceLink.hpp"
 #include "ActsExamples/EventData/SimSpacePoint.hpp"
-#include "ActsExamples/Framework/WhiteBoard.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
+#include "ActsExamples/Io/Csv/CsvInputOutput.hpp"
 #include "ActsExamples/Utilities/Paths.hpp"
-#include <Acts/Definitions/Units.hpp>
 
+#include <array>
 #include <fstream>
-#include <ios>
+#include <optional>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #include <boost/container/static_vector.hpp>
-#include <dfe/dfe_io_dsv.hpp>
 
 #include "CsvOutputData.hpp"
 
@@ -36,6 +37,8 @@ ActsExamples::CsvSpacePointReader::CsvSpacePointReader(
                        : cfg.inputStem + '_' + cfg.inputCollection;
   m_eventsRange = determineEventFilesRange(cfg.inputDir, filename + ".csv");
   m_logger = Acts::getDefaultLogger("CsvSpacePointReader", lvl);
+
+  m_outputSpacePoints.initialize(m_cfg.outputSpacePoints);
 }
 
 std::string ActsExamples::CsvSpacePointReader::CsvSpacePointReader::name()
@@ -43,8 +46,8 @@ std::string ActsExamples::CsvSpacePointReader::CsvSpacePointReader::name()
   return "CsvSpacePointReader";
 }
 
-std::pair<size_t, size_t> ActsExamples::CsvSpacePointReader::availableEvents()
-    const {
+std::pair<std::size_t, std::size_t>
+ActsExamples::CsvSpacePointReader::availableEvents() const {
   return m_eventsRange;
 }
 
@@ -58,7 +61,7 @@ ActsExamples::ProcessCode ActsExamples::CsvSpacePointReader::read(
   const auto& path =
       perEventFilepath(m_cfg.inputDir, filename + ".csv", ctx.eventNumber);
 
-  dfe::NamedTupleCsvReader<SpacePointData> reader(path);
+  ActsExamples::NamedTupleCsvReader<SpacePointData> reader(path);
   SpacePointData data;
 
   while (reader.read(data)) {
@@ -66,7 +69,7 @@ ActsExamples::ProcessCode ActsExamples::CsvSpacePointReader::read(
 
     if (m_cfg.inputCollection == "pixel" || m_cfg.inputCollection == "strip" ||
         m_cfg.inputCollection == "overlap") {
-      boost::container::static_vector<const Acts::SourceLink*, 2> sLinks;
+      boost::container::static_vector<Acts::SourceLink, 2> sLinks;
       // auto sp = SimSpacePoint(globalPos, data.sp_covr, data.sp_covz, sLinks);
 
       if (m_cfg.extendCollection) {
@@ -83,13 +86,16 @@ ActsExamples::ProcessCode ActsExamples::CsvSpacePointReader::read(
                                              data.sp_topStripCenterPosition[1],
                                              data.sp_topStripCenterPosition[2]);
 
-        spacePoints.emplace_back(globalPos, data.sp_covr, data.sp_covz, sLinks,
-                                 data.sp_topHalfStripLength,
-                                 data.sp_bottomHalfStripLength,
-                                 topStripDirection, bottomStripDirection,
-                                 stripCenterDistance, topStripCenterPosition);
+        // TODO time
+        spacePoints.emplace_back(
+            globalPos, std::nullopt, data.sp_covr, data.sp_covz, std::nullopt,
+            sLinks, data.sp_topHalfStripLength, data.sp_bottomHalfStripLength,
+            topStripDirection, bottomStripDirection, stripCenterDistance,
+            topStripCenterPosition);
       } else {
-        spacePoints.emplace_back(globalPos, data.sp_covr, data.sp_covz, sLinks);
+        // TODO time
+        spacePoints.emplace_back(globalPos, std::nullopt, data.sp_covr,
+                                 data.sp_covz, std::nullopt, sLinks);
       }
     } else {
       ACTS_ERROR("Invalid space point type " << m_cfg.inputStem);
@@ -99,8 +105,7 @@ ActsExamples::ProcessCode ActsExamples::CsvSpacePointReader::read(
 
   ACTS_DEBUG("Created " << spacePoints.size() << " " << m_cfg.inputCollection
                         << " space points");
-  ctx.eventStore.add("PixelSpacePoints", std::move(spacePoints));
-  ctx.eventStore.add("StripSpacePoints", std::move(spacePoints));
+  m_outputSpacePoints(ctx, std::move(spacePoints));
 
   return ProcessCode::SUCCESS;
 }

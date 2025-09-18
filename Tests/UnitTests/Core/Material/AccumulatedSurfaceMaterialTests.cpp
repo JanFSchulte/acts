@@ -1,20 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
+#include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Material/AccumulatedMaterialSlab.hpp"
 #include "Acts/Material/AccumulatedSurfaceMaterial.hpp"
-#include "Acts/Material/ISurfaceMaterial.hpp"
+#include "Acts/Material/Material.hpp"
+#include "Acts/Material/MaterialSlab.hpp"
+#include "Acts/Utilities/BinUtility.hpp"
+#include "Acts/Utilities/BinningType.hpp"
 
-#include <climits>
+#include <array>
+#include <cstddef>
+#include <memory>
+#include <vector>
 
-namespace Acts {
-namespace Test {
+namespace Acts::Test {
 
 /// Test the constructors
 BOOST_AUTO_TEST_CASE(AccumulatedSurfaceMaterial_construction_test) {
@@ -27,21 +34,21 @@ BOOST_AUTO_TEST_CASE(AccumulatedSurfaceMaterial_construction_test) {
   BOOST_CHECK_EQUAL(material0D.splitFactor(), 0.);
 
   // Test:
-  // BinnesSurfaceMatieral accumulation - 1D
-  BinUtility binUtility1D(10, -5., 5., open, binX);
+  // BinsSurfaceMaterial accumulation - 1D
+  BinUtility binUtility1D(10, -5., 5., open, AxisDirection::AxisX);
   AccumulatedSurfaceMaterial material1D{binUtility1D};
   auto accMat1D = material1D.accumulatedMaterial();
   BOOST_CHECK_EQUAL(accMat1D.size(), 1u);
   BOOST_CHECK_EQUAL(accMat1D[0].size(), 10u);
 
   // Test:
-  // BinnesSurfaceMatieral accumulation - 2D
-  BinUtility binUtility2D(10, -5., 5., open, binX);
-  binUtility2D += BinUtility(20, -10., 10., open, binY);
+  // BinsSurfaceMaterial accumulation - 2D
+  BinUtility binUtility2D(10, -5., 5., open, AxisDirection::AxisX);
+  binUtility2D += BinUtility(20, -10., 10., open, AxisDirection::AxisY);
   AccumulatedSurfaceMaterial material2D{binUtility2D};
   auto accMat2D = material2D.accumulatedMaterial();
   BOOST_CHECK_EQUAL(accMat2D.size(), 20u);
-  for (size_t ib = 0; ib < accMat2D.size(); ++ib) {
+  for (std::size_t ib = 0; ib < accMat2D.size(); ++ib) {
     BOOST_CHECK_EQUAL(accMat2D[ib].size(), 10u);
   }
 }
@@ -53,7 +60,7 @@ BOOST_AUTO_TEST_CASE(AccumulatedSurfaceMaterial_fill_convert_0D) {
   MaterialSlab two(mat, 2.);
 
   AccumulatedSurfaceMaterial material0D{};
-  const std::vector<std::array<size_t, 3>> bin;
+  const std::vector<std::array<std::size_t, 3>> bin;
   // assign 2 one steps
   material0D.accumulate(Vector2{0., 0.}, one);
   material0D.accumulate(Vector2{0., 0.}, one);
@@ -83,11 +90,11 @@ BOOST_AUTO_TEST_CASE(AccumulatedSurfaceMaterial_fill_convert_1D) {
   MaterialSlab three(mat, 3.);
   MaterialSlab four(mat, 4.);
 
-  // BinnesSurfaceMatieral accumulation - 2D
-  BinUtility binUtility2D(2, -1., 1., open, binX);
-  binUtility2D += BinUtility(2, -1., 1., open, binY);
+  // BinsSurfaceMaterial accumulation - 2D
+  BinUtility binUtility2D(2, -1., 1., open, AxisDirection::AxisX);
+  binUtility2D += BinUtility(2, -1., 1., open, AxisDirection::AxisY);
   AccumulatedSurfaceMaterial material2D{binUtility2D};
-  const std::vector<std::array<size_t, 3>> bin;
+  const std::vector<std::array<std::size_t, 3>> bin;
 
   // assign in the different bins
   // event 0
@@ -157,7 +164,7 @@ BOOST_AUTO_TEST_CASE(AccumulatedSurfaceMaterial_variance_0D) {
   MaterialSlab avg(matAvg, 1.);
 
   AccumulatedSurfaceMaterial material0D{};
-  const std::vector<std::array<size_t, 3>> bin;
+  const std::vector<std::array<std::size_t, 3>> bin;
   // assign 2 one steps
   material0D.accumulate(Vector2{0., 0.}, one);
   material0D.trackVariance(bin, avg);
@@ -178,5 +185,4 @@ BOOST_AUTO_TEST_CASE(AccumulatedSurfaceMaterial_variance_0D) {
   BOOST_CHECK_EQUAL(trackCount, 2u);
 }
 
-}  // namespace Test
-}  // namespace Acts
+}  // namespace Acts::Test

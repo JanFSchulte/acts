@@ -1,12 +1,13 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
+
 #include "Acts/Geometry/GeometryContext.hpp"
 
 #include <memory>
@@ -17,7 +18,7 @@ class TrackingGeometry;
 /// @class ITrackingGeometryBuilder
 ///
 /// Interface class for the TrackingGeometry building,
-/// this is used by the TrackingGeometrySvc to build the geoemtry.
+/// this is used by the TrackingGeometrySvc to build the geometry.
 ///
 /// The TrackingGeometry is written to the detector store and thus not created
 /// as a std::shared_ptr.
@@ -30,9 +31,9 @@ class ITrackingGeometryBuilder {
   /// Virtual destructor
   virtual ~ITrackingGeometryBuilder() = default;
 
-  /// TrackingGeometry Interface methode
+  /// TrackingGeometry Interface method
   ///
-  /// @param gctx ist the geometry context for witch the geometry is built
+  /// @param gctx is the geometry context for witch the geometry is built
   ///
   /// @return unique pointer to a newly created TrackingGeometry
   virtual std::unique_ptr<const TrackingGeometry> trackingGeometry(

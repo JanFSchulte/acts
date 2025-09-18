@@ -1,15 +1,16 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
 
+#include <cmath>
 #include <vector>
 
 namespace Acts {
@@ -29,21 +30,21 @@ class AnnealingUtility {
 
   /// @brief The configuration struct
   struct Config {
-    // Config constructor with default temperature list: {64.,16.,4.,2.,1.5,1.}
-    Config(const std::vector<double>& temperatures = {64., 16., 4., 2., 1.5,
-                                                      1.})
-        : setOfTemperatures(temperatures) {}
+    Config();
+
+    Config(double cutOff_, std::vector<double> setOfTemperatures_)
+        : cutOff(cutOff_), setOfTemperatures(std::move(setOfTemperatures_)) {}
 
     // Insensitivity of calculated weight at cutoff
     double cutOff{9.};
 
     // Set of temperatures, annealing starts at setOfTemperatures[0]
     // and anneals towards setOfTemperatures[last]
-    std::vector<double> setOfTemperatures;
+    std::vector<double> setOfTemperatures{64., 16., 4., 2., 1.5, 1.};
   };
 
   /// Constructor
-  AnnealingUtility(const Config& cfg = Config()) : m_cfg(cfg) {
+  explicit AnnealingUtility(const Config& cfg = Config()) : m_cfg(cfg) {
     // Set Gaussian cut-off terms for each temperature
     for (double temp : cfg.setOfTemperatures) {
       m_gaussCutTempVec.push_back(std::exp(-cfg.cutOff / (2. * temp)));

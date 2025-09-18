@@ -1,13 +1,14 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include "Acts/Propagator/Propagator.hpp"
 #include "Acts/Surfaces/Surface.hpp"
 
 #include <sstream>
@@ -25,8 +26,8 @@ struct SurfaceSelector {
   /// @param sSensitive is the directive to select sensitive surfaces
   /// @param sMaterial is the directive to select material surfaces
   /// @param sPassive is the directive to select passive surfaces
-  SurfaceSelector(bool sSensitive = true, bool sMaterial = false,
-                  bool sPassive = false)
+  explicit SurfaceSelector(bool sSensitive = true, bool sMaterial = false,
+                           bool sPassive = false)
       : selectSensitive(sSensitive),
         selectMaterial(sMaterial),
         selectPassive(sPassive) {}
@@ -82,35 +83,37 @@ struct SurfaceCollector {
   ///
   /// @tparam propagator_state_t is the type of Propagator state
   /// @tparam stepper_t Type of the stepper used for the propagation
+  /// @tparam navigator_t Type of the navigator used for the propagation
   ///
   /// @param [in,out] state is the mutable stepper state object
   /// @param [in] stepper The stepper in use
+  /// @param [in] navigator The navigator in use
   /// @param [in,out] result is the mutable result object
-  template <typename propagator_state_t, typename stepper_t>
-  void operator()(propagator_state_t& state, const stepper_t& stepper,
-                  result_type& result) const {
-    const auto& logger = state.options.logger;
+  /// @param logger a logger instance
+  template <typename propagator_state_t, typename stepper_t,
+            typename navigator_t>
+  void act(propagator_state_t& state, const stepper_t& stepper,
+           const navigator_t& navigator, result_type& result,
+           const Logger& logger) const {
+    if (state.stage == PropagatorStage::postPropagation) {
+      return;
+    }
+
+    auto currentSurface = navigator.currentSurface(state.navigation);
+
     // The current surface has been assigned by the navigator
-    if (state.navigation.currentSurface &&
-        selector(*state.navigation.currentSurface)) {
+    if (currentSurface && selector(*currentSurface)) {
       // Create for recording
       SurfaceHit surface_hit;
-      surface_hit.surface = state.navigation.currentSurface;
+      surface_hit.surface = currentSurface;
       surface_hit.position = stepper.position(state.stepping);
       surface_hit.direction = stepper.direction(state.stepping);
       // Save if in the result
       result.collected.push_back(surface_hit);
       // Screen output
-      ACTS_VERBOSE("Collect surface  "
-                   << state.navigation.currentSurface->geometryId());
+      ACTS_VERBOSE("Collect surface  " << currentSurface->geometryId());
     }
   }
-
-  /// Pure observer interface
-  /// - this does not apply to the surface collector
-  template <typename propagator_state_t, typename stepper_t>
-  void operator()(propagator_state_t& /*state*/,
-                  const stepper_t& /*unused*/) const {}
 };
 
 }  // namespace Acts

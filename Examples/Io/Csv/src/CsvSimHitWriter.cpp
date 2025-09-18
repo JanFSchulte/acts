@@ -1,22 +1,26 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Io/Csv/CsvSimHitWriter.hpp"
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Definitions/Common.hpp"
 #include "Acts/Definitions/Units.hpp"
+#include "Acts/Geometry/GeometryIdentifier.hpp"
 #include "ActsExamples/EventData/SimHit.hpp"
-#include "ActsExamples/Framework/WhiteBoard.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
+#include "ActsExamples/Io/Csv/CsvInputOutput.hpp"
 #include "ActsExamples/Utilities/Paths.hpp"
+#include "ActsFatras/EventData/Barcode.hpp"
+#include "ActsFatras/EventData/Hit.hpp"
 
 #include <stdexcept>
-
-#include <dfe/dfe_io_dsv.hpp>
+#include <vector>
 
 #include "CsvOutputData.hpp"
 
@@ -26,7 +30,7 @@ ActsExamples::CsvSimHitWriter::CsvSimHitWriter(
     : WriterT(config.inputSimHits, "CsvSimHitWriter", level), m_cfg(config) {
   // inputSimHits is already checked by base constructor
   if (m_cfg.outputStem.empty()) {
-    throw std::invalid_argument("Missing ouput filename stem");
+    throw std::invalid_argument("Missing output filename stem");
   }
 }
 
@@ -36,8 +40,8 @@ ActsExamples::ProcessCode ActsExamples::CsvSimHitWriter::writeT(
   std::string pathSimHit = perEventFilepath(
       m_cfg.outputDir, m_cfg.outputStem + ".csv", ctx.eventNumber);
 
-  dfe::NamedTupleCsvWriter<SimHitData> writerSimHit(pathSimHit,
-                                                    m_cfg.outputPrecision);
+  ActsExamples::NamedTupleCsvWriter<SimHitData> writerSimHit(
+      pathSimHit, m_cfg.outputPrecision);
 
   // CsvOutputData struct
   SimHitData simhit;
@@ -53,7 +57,7 @@ ActsExamples::ProcessCode ActsExamples::CsvSimHitWriter::writeT(
     simhit.tx = globalPos4[Acts::ePos0] / Acts::UnitConstants::mm;
     simhit.ty = globalPos4[Acts::ePos1] / Acts::UnitConstants::mm;
     simhit.tz = globalPos4[Acts::ePos2] / Acts::UnitConstants::mm;
-    simhit.tt = globalPos4[Acts::eTime] / Acts::UnitConstants::ns;
+    simhit.tt = globalPos4[Acts::eTime] / Acts::UnitConstants::mm;
     // particle four-momentum before interaction
     simhit.tpx = momentum4Before[Acts::eMom0] / Acts::UnitConstants::GeV;
     simhit.tpy = momentum4Before[Acts::eMom1] / Acts::UnitConstants::GeV;

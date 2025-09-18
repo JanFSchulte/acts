@@ -1,20 +1,26 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
+#include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Definitions/TrackParametrization.hpp"
-#include "Acts/EventData/Measurement.hpp"
+#include "Acts/EventData/MultiTrajectory.hpp"
+#include "Acts/EventData/TrackStatePropMask.hpp"
 #include "Acts/EventData/VectorMultiTrajectory.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
-#include "Acts/Tests/CommonHelpers/TestSourceLink.hpp"
 #include "Acts/TrackFitting/GainMatrixSmoother.hpp"
+#include "Acts/Utilities/Result.hpp"
+
+#include <cmath>
+#include <cstddef>
+#include <numbers>
 
 namespace {
 
@@ -22,7 +28,7 @@ using namespace Acts;
 using namespace Acts::Test;
 
 using ParametersVector = Acts::BoundVector;
-using CovarianceMatrix = Acts::BoundSymMatrix;
+using CovarianceMatrix = Acts::BoundSquareMatrix;
 using Jacobian = Acts::BoundMatrix;
 
 const Acts::GeometryContext tgContext;
@@ -33,7 +39,7 @@ BOOST_AUTO_TEST_SUITE(TrackFittingGainMatrixSmoother)
 
 BOOST_AUTO_TEST_CASE(Smooth) {
   VectorMultiTrajectory traj;
-  size_t ts_idx = traj.addTrackState(TrackStatePropMask::All);
+  std::size_t ts_idx = traj.addTrackState(TrackStatePropMask::All);
   auto ts = traj.getTrackState(ts_idx);
 
   // Make dummy track parameter
@@ -41,12 +47,12 @@ BOOST_AUTO_TEST_CASE(Smooth) {
   covTrk.setIdentity();
   covTrk.diagonal() << 0.08, 0.3, 1, 1, 1, 1;
   BoundVector parValues;
-  parValues << 0.3, 0.5, 0.5 * M_PI, 0., 1 / 100., 0.;
+  parValues << 0.3, 0.5, std::numbers::pi / 2., 0., 1 / 100., 0.;
 
   ts.predicted() = parValues;
   ts.predictedCovariance() = covTrk;
 
-  parValues << 0.301, 0.503, 0.5 * M_PI, 0., 1 / 100., 0.;
+  parValues << 0.301, 0.503, std::numbers::pi / 2., 0., 1 / 100., 0.;
 
   ts.filtered() = parValues;
   ts.filteredCovariance() = covTrk;
@@ -56,11 +62,11 @@ BOOST_AUTO_TEST_CASE(Smooth) {
   ts_idx = traj.addTrackState(TrackStatePropMask::All, ts_idx);
   ts = traj.getTrackState(ts_idx);
 
-  parValues << 0.2, 0.5, 0.5 * M_PI, 0., 1 / 100., 0.;
+  parValues << 0.2, 0.5, std::numbers::pi / 2., 0., 1 / 100., 0.;
   ts.predicted() = parValues;
   ts.predictedCovariance() = covTrk;
 
-  parValues << 0.27, 0.53, 0.5 * M_PI, 0., 1 / 100., 0.;
+  parValues << 0.27, 0.53, std::numbers::pi / 2., 0., 1 / 100., 0.;
   ts.filtered() = parValues;
   ts.filteredCovariance() = covTrk;
   ts.pathLength() = 2.;
@@ -69,11 +75,11 @@ BOOST_AUTO_TEST_CASE(Smooth) {
   ts_idx = traj.addTrackState(TrackStatePropMask::All, ts_idx);
   ts = traj.getTrackState(ts_idx);
 
-  parValues << 0.35, 0.49, 0.5 * M_PI, 0., 1 / 100., 0.;
+  parValues << 0.35, 0.49, std::numbers::pi / 2., 0., 1 / 100., 0.;
   ts.predicted() = parValues;
   ts.predictedCovariance() = covTrk;
 
-  parValues << 0.33, 0.43, 0.5 * M_PI, 0., 1 / 100., 0.;
+  parValues << 0.33, 0.43, std::numbers::pi / 2., 0., 1 / 100., 0.;
   ts.filtered() = parValues;
   ts.filteredCovariance() = covTrk;
   ts.pathLength() = 3.;

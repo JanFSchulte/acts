@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -12,8 +12,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace ActsFatras {
-namespace detail {
+namespace ActsFatras::detail {
 
 /// Combine multiple selectors with a configurable combine function.
 template <bool Initial, typename Combine, typename... Selectors>
@@ -29,7 +28,7 @@ class CombineSelectors {
   ///
   /// @tparam Ts the types of the selected inputs
   template <typename... Ts>
-  bool operator()(const Ts &... things) const {
+  bool operator()(const Ts &...things) const {
     static_assert(
         (true && ... && std::is_same_v<bool, decltype(Selectors()(things...))>),
         "Not all selectors conform to the expected interface (bool)(const "
@@ -38,7 +37,7 @@ class CombineSelectors {
   }
 
   /// Access a specific selector by index.
-  template <size_t I>
+  template <std::size_t I>
   std::tuple_element_t<I, std::tuple<Selectors...>> &get() {
     return std::get<I>(m_selectors);
   }
@@ -52,7 +51,7 @@ class CombineSelectors {
   std::tuple<Selectors...> m_selectors;
 
   template <std::size_t... Is, typename... Ts>
-  bool impl(std::index_sequence<Is...> /*unused*/, const Ts &... things) const {
+  bool impl(std::index_sequence<Is...> /*indices*/, const Ts &...things) const {
     Combine combine;
     // compute status for all selectors
     bool status[] = {std::get<Is>(m_selectors)(things...)...};
@@ -65,5 +64,4 @@ class CombineSelectors {
   }
 };
 
-}  // namespace detail
-}  // namespace ActsFatras
+}  // namespace ActsFatras::detail

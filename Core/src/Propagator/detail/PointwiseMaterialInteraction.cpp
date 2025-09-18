@@ -1,22 +1,21 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Propagator/detail/PointwiseMaterialInteraction.hpp"
 
 #include "Acts/Material/Interactions.hpp"
-#include "Acts/Utilities/Helpers.hpp"
 
-namespace Acts {
-namespace detail {
+namespace Acts::detail {
+
 void PointwiseMaterialInteraction::evaluatePointwiseMaterialInteraction(
     bool multipleScattering, bool energyLoss) {
   if (energyLoss) {
-    Eloss = computeEnergyLossBethe(slab, pdg, mass, qOverP, q);
+    Eloss = computeEnergyLossBethe(slab, mass, qOverP, absQ);
   }
   // Compute contributions from interactions
   if (performCovarianceTransport) {
@@ -29,8 +28,8 @@ void PointwiseMaterialInteraction::covarianceContributions(
   // Compute contributions from interactions
   if (multipleScattering) {
     // TODO use momentum before or after energy loss in backward mode?
-    const auto theta0 =
-        computeMultipleScatteringTheta0(slab, pdg, mass, qOverP, q);
+    const float theta0 =
+        computeMultipleScatteringTheta0(slab, absPdg, mass, qOverP, absQ);
     // sigmaPhi = theta0 / sin(theta)
     const auto sigmaPhi = theta0 * (dir.norm() / VectorHelpers::perp(dir));
     variancePhi = sigmaPhi * sigmaPhi;
@@ -39,8 +38,8 @@ void PointwiseMaterialInteraction::covarianceContributions(
   }
   // TODO just ionisation loss or full energy loss?
   if (energyLoss) {
-    const auto sigmaQoverP =
-        computeEnergyLossLandauSigmaQOverP(slab, pdg, mass, qOverP, q);
+    const float sigmaQoverP =
+        computeEnergyLossLandauSigmaQOverP(slab, mass, qOverP, absQ);
     varianceQoverP = sigmaQoverP * sigmaQoverP;
   }
 }
@@ -51,5 +50,5 @@ double PointwiseMaterialInteraction::updateVariance(
   // Protect the variance against becoming negative
   return std::max(0., variance + std::copysign(change, updateMode));
 }
-}  // namespace detail
-}  // end of namespace Acts
+
+}  // namespace Acts::detail

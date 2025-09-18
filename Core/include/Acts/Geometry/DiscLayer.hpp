@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -12,13 +12,13 @@
 #include "Acts/Geometry/ApproachDescriptor.hpp"
 #include "Acts/Geometry/Layer.hpp"
 #include "Acts/Surfaces/DiscSurface.hpp"
-#include "Acts/Surfaces/SurfaceArray.hpp"
 
 #include <memory>
 
 namespace Acts {
 
 class DiscBounds;
+class SurfaceArray;
 
 /// @class DiscLayer
 ///
@@ -40,16 +40,12 @@ class DiscLayer : virtual public DiscSurface, public Layer {
   /// @todo move ApproachDescriptor to unqique_ptr
   ///
   /// @return a sharted pointer to the new layer
-  static MutableLayerPtr create(
+  static std::shared_ptr<DiscLayer> create(
       const Transform3& transform,
       const std::shared_ptr<const DiscBounds>& dbounds,
       std::unique_ptr<SurfaceArray> surfaceArray = nullptr,
       double thickness = 0., std::unique_ptr<ApproachDescriptor> ad = nullptr,
-      LayerType laytyp = Acts::passive) {
-    return MutableLayerPtr(new DiscLayer(transform, dbounds,
-                                         std::move(surfaceArray), thickness,
-                                         std::move(ad), laytyp));
-  }
+      LayerType laytyp = passive);
 
   DiscLayer() = delete;
   DiscLayer(const DiscLayer& cla) = delete;
@@ -81,7 +77,7 @@ class DiscLayer : virtual public DiscSurface, public Layer {
             std::unique_ptr<SurfaceArray> surfaceArray = nullptr,
             double thickness = 0.,
             std::unique_ptr<ApproachDescriptor> ades = nullptr,
-            LayerType laytyp = Acts::active);
+            LayerType laytyp = active);
 
   /// Copy constructor with shift
   DiscLayer(const DiscLayer& cla, const Transform3& tr);

@@ -1,13 +1,10 @@
-from pathlib import Path
-
 import pytest
+from pathlib import Path
 
 from helpers import dd4hepEnabled
 
-from common import getOpenDataDetectorDirectory
-from acts.examples.odd import getOpenDataDetector
-
 import acts.examples
+from acts.examples.odd import getOpenDataDetector
 
 
 def count_surfaces(geo):
@@ -23,55 +20,51 @@ def count_surfaces(geo):
     return nSurfaces
 
 
+def check_extra_odd(srf):
+    if srf.geometryId.volume in [28, 30, 23, 25, 16, 18]:
+        assert srf.geometryId.extra != 0
+    return
+
+
 def test_generic_geometry():
-    detector, geo, contextDecorators = acts.examples.GenericDetector.create()
+    detector = acts.examples.GenericDetector()
+    trackingGeometry = detector.trackingGeometry()
+    contextDecorators = detector.contextDecorators()
     assert detector is not None
-    assert geo is not None
+    assert trackingGeometry is not None
     assert contextDecorators is not None
 
-    assert count_surfaces(geo) == 18728
+    assert count_surfaces(trackingGeometry) == 18728
 
 
 def test_telescope_geometry():
     n_surfaces = 10
 
-    detector, geo, contextDecorators = acts.examples.TelescopeDetector.create(
+    config = acts.examples.TelescopeDetector.Config(
         bounds=[100, 100],
         positions=[10 * i for i in range(n_surfaces)],
+        stereos=[0] * n_surfaces,
         binValue=0,
     )
+    detector = acts.examples.TelescopeDetector(config)
+    trackingGeometry = detector.trackingGeometry()
+    contextDecorators = detector.contextDecorators()
 
     assert detector is not None
-    assert geo is not None
+    assert trackingGeometry is not None
     assert contextDecorators is not None
 
-    assert count_surfaces(geo) == n_surfaces
+    assert count_surfaces(trackingGeometry) == n_surfaces
 
 
 @pytest.mark.skipif(not dd4hepEnabled, reason="DD4hep is not set up")
 def test_odd():
-    config = acts.MaterialMapJsonConverter.Config()
-    matDeco = acts.JsonMaterialDecorator(
-        rConfig=config,
-        jFileName=str(
-            getOpenDataDetectorDirectory() / "config/odd-material-mapping-config.json"
-        ),
-        level=acts.logging.WARNING,
-    )
+    with getOpenDataDetector() as detector:
+        trackingGeometry = detector.trackingGeometry()
 
-    detector, geo, _ = getOpenDataDetector(getOpenDataDetectorDirectory(), matDeco)
+        trackingGeometry.visitSurfaces(check_extra_odd)
 
-    assert count_surfaces(geo) == 18824
-
-
-def test_aligned_detector():
-    detector, geo, deco = acts.examples.AlignedDetector.create()
-
-    assert detector is not None
-    assert geo is not None
-    assert deco is not None
-
-    assert count_surfaces(geo) == 18728
+        assert count_surfaces(trackingGeometry) == 18824
 
 
 import itertools
@@ -162,3 +155,34 @@ def test_tgeo_config_volume(monkeypatch):
 
         v = Volume(**{key: (4, None)})
         assert getattr(v, key) == Interval(4, None)
+
+
+def test_coordinate_converter(trk_geo):
+    digiCfg = acts.examples.DigitizationAlgorithm.Config(
+        digitizationConfigs=acts.examples.readDigiConfigFromJson(
+            str(
+                Path(__file__).parent.parent.parent.parent
+                / "Examples/Configs/generic-digi-smearing-config.json"
+            )
+        ),
+        surfaceByIdentifier=trk_geo.geoIdSurfaceMap(),
+    )
+    converter = acts.examples.DigitizationCoordinatesConverter(digiCfg)
+
+    def test_surface(surface):
+        gctx = acts.GeometryContext()
+        geo_id = surface.geometryId.value
+        geo_center = surface.center(gctx)
+        x, y, z = geo_center[0], geo_center[1], geo_center[2]
+
+        # test if surface center can be reproduced
+        assert converter.globalToLocal(geo_id, x, y, z) == (0, 0)
+        assert converter.localToGlobal(geo_id, 0, 0) == (x, y, z)
+
+        # test if we can get back to the same local coordinates
+        global_shifted = converter.localToGlobal(geo_id, 5, 5)
+        local_shifted = converter.globalToLocal(geo_id, *global_shifted)
+        assert abs(local_shifted[0] - 5) / 5 < 1e-6
+        assert abs(local_shifted[1] - 5) / 5 < 1e-6
+
+    trk_geo.visitSurfaces(test_surface)

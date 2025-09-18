@@ -1,70 +1,51 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/Definitions/Units.hpp"
-#include "Acts/EventData/NeutralTrackParameters.hpp"
-#include "Acts/EventData/TrackParameters.hpp"
-#include "Acts/Propagator/AbortList.hpp"
-#include "Acts/Propagator/ActionList.hpp"
-#include "Acts/Propagator/DenseEnvironmentExtension.hpp"
+#include "Acts/Material/MaterialInteraction.hpp"
 #include "Acts/Propagator/MaterialInteractor.hpp"
-#include "Acts/Propagator/Navigator.hpp"
-#include "Acts/Propagator/Propagator.hpp"
-#include "Acts/Propagator/StandardAborters.hpp"
 #include "Acts/Propagator/detail/SteppingLogger.hpp"
-#include "Acts/Surfaces/PerigeeSurface.hpp"
-#include "Acts/Utilities/Helpers.hpp"
-#include "ActsExamples/Framework/BareAlgorithm.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "ActsExamples/EventData/PropagationSummary.hpp"
+#include "ActsExamples/EventData/Track.hpp"
+#include "ActsExamples/Framework/DataHandle.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
 #include "ActsExamples/Framework/ProcessCode.hpp"
-#include "ActsExamples/Framework/RandomNumbers.hpp"
-#include "ActsExamples/Framework/WhiteBoard.hpp"
 
-#include <cmath>
-#include <limits>
 #include <memory>
-#include <optional>
+#include <string>
+#include <unordered_map>
 
 namespace ActsExamples {
 
 class PropagatorInterface;
-
-/// Using some short hands for Recorded Material
-using RecordedMaterial = Acts::MaterialInteractor::result_type;
-
-/// And recorded material track
-/// - this is start:  position, start momentum
-///   and the Recorded material
-using RecordedMaterialTrack =
-    std::pair<std::pair<Acts::Vector3, Acts::Vector3>, RecordedMaterial>;
-
-/// Finally the output of the propagation test
-using PropagationOutput =
-    std::pair<std::vector<Acts::detail::Step>, RecordedMaterial>;
+struct AlgorithmContext;
 
 /// @brief this test algorithm performs test propagation
 /// within the Acts::Propagator
 ///
 /// If the propagator is equipped appropriately, it can
 /// also be used to test the Extrapolator within the geomtetry
-class PropagationAlgorithm : public BareAlgorithm {
+class PropagationAlgorithm : public IAlgorithm {
  public:
   struct Config {
+    /// Input track parameters
+    std::string inputTrackParameters = "InputTrackParameters";
+    /// The step collection to be stored
+    std::string outputSummaryCollection = "PropagationSummary";
+    /// The material collection to be stored
+    std::string outputMaterialCollection = "RecordedMaterialTracks";
+
     /// Instance of a propagator wrapper that performs the actual propagation
     std::shared_ptr<PropagatorInterface> propagatorImpl = nullptr;
-
-    /// how to set it up
-    std::shared_ptr<RandomNumbers> randomNumberSvc = nullptr;
-    /// proapgation mode
-    int mode = 0;
-    /// Switch the logger to sterile
+    /// Switch the logger to sterile - for timing measurements
     bool sterileLogger = false;
     /// debug output
     bool debugOutput = false;
@@ -74,58 +55,22 @@ class PropagationAlgorithm : public BareAlgorithm {
     bool multipleScattering = true;
     /// Modify the behavior of the material interaction: record
     bool recordMaterialInteractions = true;
-
-    /// number of particles
-    size_t ntests = 100;
-    /// d0 gaussian sigma
-    double d0Sigma = 15 * Acts::UnitConstants::um;
-    /// z0 gaussian sigma
-    double z0Sigma = 55 * Acts::UnitConstants::mm;
-    /// phi gaussian sigma (used for covariance transport)
-    double phiSigma = 0.001;
-    /// theta gaussian sigma (used for covariance transport)
-    double thetaSigma = 0.001;
-    /// qp gaussian sigma (used for covariance transport)
-    double qpSigma = 0.0001 / 1 * Acts::UnitConstants::GeV;
-    /// t gaussian sigma (used for covariance transport)
-    double tSigma = 1 * Acts::UnitConstants::ns;
-    /// phi range
-    std::pair<double, double> phiRange = {-M_PI, M_PI};
-    /// eta range
-    std::pair<double, double> etaRange = {-4., 4.};
-    /// pt range
-    std::pair<double, double> ptRange = {100 * Acts::UnitConstants::MeV,
-                                         100 * Acts::UnitConstants::GeV};
     /// looper protection
     double ptLoopers = 500 * Acts::UnitConstants::MeV;
-
     /// Max step size steering
-    double maxStepSize = 3 * Acts::UnitConstants::m;
-
-    /// The step collection to be stored
-    std::string propagationStepCollection = "PropagationSteps";
-
-    /// The material collection to be stored
-    std::string propagationMaterialCollection = "RecordedMaterialTracks";
-
-    /// covariance transport
+    double maxStepSize = 5 * Acts::UnitConstants::m;
+    /// Switch covariance transport on
     bool covarianceTransport = false;
-
-    /// The covariance values
-    Acts::BoundVector covariances = Acts::BoundVector::Zero();
-
-    /// The correlation terms
-    Acts::BoundSymMatrix correlations = Acts::BoundSymMatrix::Identity();
   };
 
   /// Constructor
   /// @param [in] config is the configuration struct
-  /// @param [in] loglevel is the loggin level
+  /// @param [in] loglevel is the logging level
   PropagationAlgorithm(const Config& config, Acts::Logging::Level level);
 
   /// Framework execute method
   /// @param [in] the algorithm context for event consistency
-  /// @return is a process code indicating succes or not
+  /// @return is a process code indicating success or not
   ActsExamples::ProcessCode execute(
       const AlgorithmContext& context) const override;
 
@@ -133,14 +78,15 @@ class PropagationAlgorithm : public BareAlgorithm {
   const Config& config() const { return m_cfg; }
 
  private:
-  Config m_cfg;  ///< the config class
+  Config m_cfg;
 
-  /// Private helper method to create a corrleated covariance matrix
-  /// @param[in] rnd is the random engine
-  /// @param[in] gauss is a gaussian distribution to draw from
-  std::optional<Acts::BoundSymMatrix> generateCovariance(
-      ActsExamples::RandomEngine& rnd,
-      std::normal_distribution<double>& gauss) const;
+  ReadDataHandle<TrackParametersContainer> m_inputTrackParameters{
+      this, "InputTrackParameters"};
+
+  WriteDataHandle<PropagationSummaries> m_outputSummary{this, "OutputSummary"};
+
+  WriteDataHandle<std::unordered_map<std::size_t, Acts::RecordedMaterialTrack>>
+      m_outputMaterialTracks{this, "RecordedMaterial"};
 };
 
 }  // namespace ActsExamples

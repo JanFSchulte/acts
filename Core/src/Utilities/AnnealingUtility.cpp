@@ -1,13 +1,16 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Utilities/AnnealingUtility.hpp"
 
+#include "Acts/Utilities/AlgebraHelpers.hpp"
+
+namespace {
 /// @brief Gaussian-like function for weight calculation
 /// Note: Factor 2 in denominator is included in inverse temperature
 ///
@@ -15,9 +18,12 @@
 /// @param invTemp Denominator 1/(2 * temperature)
 ///
 /// @return exp(-chi2 * invTemp)
-static double computeAnnealingWeight(double chi2, double invTemp) {
-  return std::exp(-chi2 * invTemp);
+double computeAnnealingWeight(double chi2, double invTemp) {
+  return Acts::safeExp(-chi2 * invTemp);
 }
+}  // namespace
+
+Acts::AnnealingUtility::Config::Config() = default;
 
 void Acts::AnnealingUtility::anneal(State& state) const {
   if (state.currentTemperatureIndex < m_cfg.setOfTemperatures.size() - 1) {

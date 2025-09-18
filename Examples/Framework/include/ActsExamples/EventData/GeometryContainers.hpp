@@ -1,29 +1,48 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Geometry/GeometryIdentifier.hpp"
-#include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Utilities/PointerTraits.hpp"
 #include "ActsExamples/Utilities/GroupBy.hpp"
 #include "ActsExamples/Utilities/Range.hpp"
 
 #include <algorithm>
 #include <cassert>
-#include <cstddef>
-#include <iostream>
 #include <utility>
 
+#include <boost/bimap.hpp>
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 
 namespace ActsExamples {
 namespace detail {
+/// @brief Concept to define objects that have a geometryId getter method
+template <typename ObjType>
+concept GeometryIdObj = requires(const ObjType& obj) {
+  { obj.geometryId() } -> std::same_as<Acts::GeometryIdentifier>;
+};
+/// @brief Concept to define objects to pointer that have a geometryId getter method
+template <typename ObjType>
+concept GeometryIdPtrObj =
+    Acts::PointerConcept<ObjType> &&
+    GeometryIdObj<typename Acts::RemovePointer<ObjType>::type>;
+
+/// @brief Concept to define an object which carries time
+template <typename ObjType>
+concept TimedObj = requires(const ObjType& obj) {
+  { obj.time() };
+};
+/// @brief Concept to define a pointer to an object which carries time
+template <typename ObjType>
+concept TimedObjPtr = Acts::PointerConcept<ObjType> &&
+                      TimedObj<typename Acts::RemovePointer<ObjType>::type>;
 
 // extract the geometry identifier from a variety of types
 struct GeometryIdGetter {
@@ -43,14 +62,18 @@ struct GeometryIdGetter {
       const std::pair<Acts::GeometryIdentifier, T>& mapItem) const {
     return mapItem.first;
   }
+  // Support pointer to object that implement `.geometryId()`.
+  template <GeometryIdPtrObj T>
+  constexpr Acts::GeometryIdentifier operator()(const T& thing) const {
+    return thing->geometryId();
+  }
   // support elements that implement `.geometryId()`.
-  template <typename T>
-  inline auto operator()(const T& thing) const
-      -> decltype(thing.geometryId(), Acts::GeometryIdentifier()) {
+  template <GeometryIdObj T>
+  inline auto operator()(const T& thing) const {
     return thing.geometryId();
   }
   // support reference_wrappers around such types as well
-  template <typename T>
+  template <GeometryIdObj T>
   inline auto operator()(std::reference_wrapper<T> thing) const
       -> decltype(thing.get().geometryId(), Acts::GeometryIdentifier()) {
     return thing.get().geometryId();
@@ -60,6 +83,21 @@ struct GeometryIdGetter {
 struct CompareGeometryId {
   // indicate that comparisons between keys and full objects are allowed.
   using is_transparent = void;
+
+  /// @brief Comparator that sorts objects with the same geometry id by time
+  template <TimedObj Left, TimedObj Right>
+  constexpr bool operator()(const Left& lhs, const Right& rhs) const {
+    const auto lId = GeometryIdGetter{}(lhs);
+    const auto rId = GeometryIdGetter{}(rhs);
+    if (lId == rId) {
+      return lhs.time() < rhs.time();
+    }
+    return lId < rId;
+  }
+  template <TimedObjPtr Left, TimedObjPtr Right>
+  constexpr bool operator()(const Left& lhs, const Right& rhs) const {
+    return (*this)(*lhs, *rhs);
+  }
   // compare two elements using the automatic key extraction.
   template <typename Left, typename Right>
   constexpr bool operator()(Left&& lhs, Right&& rhs) const {
@@ -76,13 +114,12 @@ struct CompareGeometryId {
 /// The container stores an arbitrary number of elements for any geometry
 /// id. Elements can be retrieved via the geometry id; elements can be selected
 /// for a specific geometry id or for a larger range, e.g. a volume or a layer
-/// within the geometry hierachy using the helper functions below. Elements can
+/// within the geometry hierarchy using the helper functions below. Elements can
 /// also be accessed by index that uniquely identifies each element regardless
 /// of geometry id.
 template <typename T>
 using GeometryIdMultiset =
     boost::container::flat_multiset<T, detail::CompareGeometryId>;
-
 /// Store elements indexed by an geometry id.
 ///
 /// @tparam T type to be stored
@@ -105,11 +142,11 @@ template <typename T>
 inline Range<typename GeometryIdMultiset<T>::const_iterator> selectVolume(
     const GeometryIdMultiset<T>& container,
     Acts::GeometryIdentifier::Value volume) {
-  auto cmp = Acts::GeometryIdentifier().setVolume(volume);
+  auto cmp = Acts::GeometryIdentifier().withVolume(volume);
   auto beg = std::lower_bound(container.begin(), container.end(), cmp,
                               detail::CompareGeometryId{});
   // WARNING overflows to volume==0 if the input volume is the last one
-  cmp = Acts::GeometryIdentifier().setVolume(volume + 1u);
+  cmp = Acts::GeometryIdentifier().withVolume(volume + 1u);
   // optimize search by using the lower bound as start point. also handles
   // volume overflows since the geo id would be located before the start of
   // the upper edge search window.
@@ -131,11 +168,11 @@ inline Range<typename GeometryIdMultiset<T>::const_iterator> selectLayer(
     const GeometryIdMultiset<T>& container,
     Acts::GeometryIdentifier::Value volume,
     Acts::GeometryIdentifier::Value layer) {
-  auto cmp = Acts::GeometryIdentifier().setVolume(volume).setLayer(layer);
+  auto cmp = Acts::GeometryIdentifier().withVolume(volume).withLayer(layer);
   auto beg = std::lower_bound(container.begin(), container.end(), cmp,
                               detail::CompareGeometryId{});
   // WARNING resets to layer==0 if the input layer is the last one
-  cmp = Acts::GeometryIdentifier().setVolume(volume).setLayer(layer + 1u);
+  cmp = Acts::GeometryIdentifier().withVolume(volume).withLayer(layer + 1u);
   // optimize search by using the lower bound as start point. also handles
   // volume overflows since the geo id would be located before the start of
   // the upper edge search window.
@@ -164,11 +201,11 @@ template <typename T>
 inline auto selectModule(const GeometryIdMultiset<T>& container,
                          Acts::GeometryIdentifier::Value volume,
                          Acts::GeometryIdentifier::Value layer,
-                         Acts::GeometryIdentifier::Value module) {
-  return selectModule(
-      container,
-      Acts::GeometryIdentifier().setVolume(volume).setLayer(layer).setSensitive(
-          module));
+                         Acts::GeometryIdentifier::Value sensitive) {
+  return selectModule(container, Acts::GeometryIdentifier()
+                                     .withVolume(volume)
+                                     .withLayer(layer)
+                                     .withSensitive(sensitive));
 }
 
 /// Select all elements for the lowest non-zero identifier component.
@@ -178,9 +215,9 @@ inline auto selectModule(const GeometryIdMultiset<T>& container,
 /// applies to the lower components and not to intermediate zeros.
 ///
 /// Examples:
-/// - volume=2,layer=0,module=3 -> select all elements in the module
-/// - volume=1,layer=2,module=0 -> select all elements in the layer
-/// - volume=3,layer=0,module=0 -> select all elements in the volume
+/// - volume=2,layer=0,sensitive=3 -> select all elements in the sensitive
+/// - volume=1,layer=2,sensitive=0 -> select all elements in the layer
+/// - volume=3,layer=0,sensitive=0 -> select all elements in the volume
 ///
 /// @note An identifier with all components set to zero selects the whole input
 ///   container.
@@ -191,8 +228,8 @@ template <typename T>
 inline Range<typename GeometryIdMultiset<T>::const_iterator>
 selectLowestNonZeroGeometryObject(const GeometryIdMultiset<T>& container,
                                   Acts::GeometryIdentifier geoId) {
-  assert((geoId.boundary() == 0u) and "Boundary component must be zero");
-  assert((geoId.approach() == 0u) and "Approach component must be zero");
+  assert((geoId.boundary() == 0u) && "Boundary component must be zero");
+  assert((geoId.approach() == 0u) && "Approach component must be zero");
 
   if (geoId.sensitive() != 0u) {
     return selectModule(container, geoId);
@@ -226,12 +263,11 @@ struct GeometryIdMultisetAccessor {
 
   // pointer to the container
   const Container* container = nullptr;
-
-  // get the range of elements with requested geoId
-  std::pair<Iterator, Iterator> range(const Acts::Surface& surface) const {
-    assert(container != nullptr);
-    return container->equal_range(surface.geometryId());
-  }
 };
+
+/// A map that allows mapping back and forth between ACTS and Athena Geometry
+/// Ids
+using GeometryIdMapActsAthena =
+    boost::bimap<std::uint64_t, Acts::GeometryIdentifier>;
 
 }  // namespace ActsExamples

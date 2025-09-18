@@ -1,15 +1,12 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
-
-// Workaround for building on clang+libstdc++
-#include "Acts/Utilities/detail/ReferenceWrapperAnyCompat.hpp"
 
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
@@ -18,8 +15,8 @@
 #include "Acts/MagneticField/MagneticFieldContext.hpp"
 #include "Acts/Material/AccumulatedVolumeMaterial.hpp"
 #include "Acts/Material/MaterialGridHelper.hpp"
+#include "Acts/Material/MaterialInteraction.hpp"
 #include "Acts/Material/MaterialSlab.hpp"
-#include "Acts/Propagator/MaterialInteractor.hpp"
 #include "Acts/Propagator/Navigator.hpp"
 #include "Acts/Propagator/Propagator.hpp"
 #include "Acts/Propagator/StraightLineStepper.hpp"
@@ -27,10 +24,10 @@
 #include "Acts/Utilities/BinUtility.hpp"
 #include "Acts/Utilities/Logger.hpp"
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <utility>
-#include <vector>
 
 namespace Acts {
 
@@ -78,7 +75,7 @@ class VolumeMaterialMapper {
   ///
   /// Nested State struct which is used for the mapping prococess
   struct State {
-    /// Constructor of the Sate with contexts
+    /// Constructor of the State with contexts
     State(const GeometryContext& gctx, const MagneticFieldContext& mctx)
         : geoContext(gctx), magFieldContext(mctx) {}
 

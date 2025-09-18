@@ -1,32 +1,45 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Fatras/FatrasSimulation.hpp"
 
-#include "Acts/Propagator/EigenStepper.hpp"
+#include "Acts/Geometry/GeometryContext.hpp"
+#include "Acts/MagneticField/MagneticFieldContext.hpp"
 #include "Acts/Propagator/Navigator.hpp"
 #include "Acts/Propagator/Propagator.hpp"
 #include "Acts/Propagator/StraightLineStepper.hpp"
+#include "Acts/Propagator/SympyStepper.hpp"
 #include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Utilities/Logger.hpp"
+#include "Acts/Utilities/Result.hpp"
 #include "ActsExamples/EventData/SimHit.hpp"
 #include "ActsExamples/EventData/SimParticle.hpp"
-#include "ActsExamples/Framework/BareAlgorithm.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
 #include "ActsExamples/Framework/RandomNumbers.hpp"
-#include "ActsExamples/Framework/WhiteBoard.hpp"
+#include "ActsFatras/EventData/Hit.hpp"
+#include "ActsFatras/EventData/Particle.hpp"
 #include "ActsFatras/Kernel/InteractionList.hpp"
 #include "ActsFatras/Kernel/Simulation.hpp"
 #include "ActsFatras/Physics/Decay/NoDecay.hpp"
 #include "ActsFatras/Physics/ElectroMagnetic/PhotonConversion.hpp"
 #include "ActsFatras/Physics/StandardInteractions.hpp"
-#include "ActsFatras/Selectors/KinematicCasts.hpp"
 #include "ActsFatras/Selectors/SelectorHelpers.hpp"
 #include "ActsFatras/Selectors/SurfaceSelectors.hpp"
+
+#include <algorithm>
+#include <ostream>
+#include <stdexcept>
+#include <system_error>
+#include <utility>
+#include <vector>
+
+#include <boost/version.hpp>
 
 namespace {
 
@@ -42,9 +55,9 @@ struct HitSurfaceSelector {
     bool isSensitive = surface.associatedDetectorElement() != nullptr;
     bool isMaterial = surface.surfaceMaterial() != nullptr;
     // passive should be an orthogonal category
-    bool isPassive = not(isSensitive or isMaterial);
-    return (isSensitive and sensitive) or (isMaterial and material) or
-           (isPassive and passive);
+    bool isPassive = !(isSensitive || isMaterial);
+    return (isSensitive && sensitive) || (isMaterial && material) ||
+           (isPassive && passive);
   }
 };
 
@@ -55,26 +68,23 @@ struct ActsExamples::detail::FatrasSimulation {
   virtual ~FatrasSimulation() = default;
   virtual Acts::Result<std::vector<ActsFatras::FailedParticle>> simulate(
       const Acts::GeometryContext &, const Acts::MagneticFieldContext &,
-      ActsExamples::RandomEngine &, const ActsExamples::SimParticleContainer &,
-      ActsExamples::SimParticleContainer::sequence_type &,
-      ActsExamples::SimParticleContainer::sequence_type &,
-      ActsExamples::SimHitContainer::sequence_type &) const = 0;
+      ActsExamples::RandomEngine &, const std::vector<ActsFatras::Particle> &,
+      std::vector<ActsFatras::Particle> &, std::vector<ActsFatras::Particle> &,
+      std::vector<ActsFatras::Hit> &) const = 0;
 };
 
 namespace {
 
 // Magnetic-field specific PIMPL implementation.
 //
-// This always uses the EigenStepper with default extensions for charged
-// particle propagation and is thus limited to propagation in vacuum at the
-// moment.
-// @TODO: Remove this, unneeded after #675
+// This always uses the SympyStepper for charged particle propagation and is
+// thus limited to propagation in vacuum at the moment.
 struct FatrasSimulationT final : ActsExamples::detail::FatrasSimulation {
   using CutPMin = ActsFatras::Min<ActsFatras::Casts::P>;
 
   // typedefs for charge particle simulation
   // propagate charged particles numerically in the given magnetic field
-  using ChargedStepper = Acts::EigenStepper<>;
+  using ChargedStepper = Acts::SympyStepper;
   using ChargedPropagator = Acts::Propagator<ChargedStepper, Acts::Navigator>;
   // charged particles w/ standard em physics list and selectable hits
   using ChargedSelector = CutPMin;
@@ -104,12 +114,18 @@ struct FatrasSimulationT final : ActsExamples::detail::FatrasSimulation {
                     Acts::Logging::Level lvl)
       : simulation(
             ChargedSimulation(
-                ChargedPropagator(ChargedStepper(cfg.magneticField),
-                                  Acts::Navigator{{cfg.trackingGeometry}}),
+                ChargedPropagator(
+                    ChargedStepper(cfg.magneticField),
+                    Acts::Navigator({cfg.trackingGeometry},
+                                    Acts::getDefaultLogger("SimNav", lvl)),
+                    Acts::getDefaultLogger("SimProp", lvl)),
                 Acts::getDefaultLogger("Simulation", lvl)),
             NeutralSimulation(
-                NeutralPropagator(NeutralStepper(),
-                                  Acts::Navigator{{cfg.trackingGeometry}}),
+                NeutralPropagator(
+                    NeutralStepper(),
+                    Acts::Navigator({cfg.trackingGeometry},
+                                    Acts::getDefaultLogger("SimNav", lvl)),
+                    Acts::getDefaultLogger("SimProp", lvl)),
                 Acts::getDefaultLogger("Simulation", lvl))) {
     using namespace ActsFatras;
     using namespace ActsFatras::detail;
@@ -122,16 +138,16 @@ struct FatrasSimulationT final : ActsExamples::detail::FatrasSimulation {
         makeStandardChargedElectroMagneticInteractions(cfg.pMin);
 
     // processes are enabled by default
-    if (not cfg.emScattering) {
+    if (!cfg.emScattering) {
       simulation.charged.interactions.template disable<StandardScattering>();
     }
-    if (not cfg.emEnergyLossIonisation) {
+    if (!cfg.emEnergyLossIonisation) {
       simulation.charged.interactions.template disable<StandardBetheBloch>();
     }
-    if (not cfg.emEnergyLossRadiation) {
+    if (!cfg.emEnergyLossRadiation) {
       simulation.charged.interactions.template disable<StandardBetheHeitler>();
     }
-    if (not cfg.emPhotonConversion) {
+    if (!cfg.emPhotonConversion) {
       simulation.neutral.interactions.template disable<PhotonConversion>();
     }
 
@@ -139,18 +155,21 @@ struct FatrasSimulationT final : ActsExamples::detail::FatrasSimulation {
     simulation.charged.selectHitSurface.sensitive = cfg.generateHitsOnSensitive;
     simulation.charged.selectHitSurface.material = cfg.generateHitsOnMaterial;
     simulation.charged.selectHitSurface.passive = cfg.generateHitsOnPassive;
+
+    simulation.charged.maxStepSize = cfg.maxStepSize;
+    simulation.charged.pathLimit = cfg.pathLimit;
+    simulation.neutral.maxStepSize = cfg.maxStepSize;
+    simulation.neutral.pathLimit = cfg.pathLimit;
   }
   ~FatrasSimulationT() final = default;
 
   Acts::Result<std::vector<ActsFatras::FailedParticle>> simulate(
       const Acts::GeometryContext &geoCtx,
       const Acts::MagneticFieldContext &magCtx, ActsExamples::RandomEngine &rng,
-      const ActsExamples::SimParticleContainer &inputParticles,
-      ActsExamples::SimParticleContainer::sequence_type
-          &simulatedParticlesInitial,
-      ActsExamples::SimParticleContainer::sequence_type
-          &simulatedParticlesFinal,
-      ActsExamples::SimHitContainer::sequence_type &simHits) const final {
+      const std::vector<ActsFatras::Particle> &inputParticles,
+      std::vector<ActsFatras::Particle> &simulatedParticlesInitial,
+      std::vector<ActsFatras::Particle> &simulatedParticlesFinal,
+      std::vector<ActsFatras::Hit> &simHits) const final {
     return simulation.simulate(geoCtx, magCtx, rng, inputParticles,
                                simulatedParticlesInitial,
                                simulatedParticlesFinal, simHits);
@@ -161,8 +180,7 @@ struct FatrasSimulationT final : ActsExamples::detail::FatrasSimulation {
 
 ActsExamples::FatrasSimulation::FatrasSimulation(Config cfg,
                                                  Acts::Logging::Level lvl)
-    : ActsExamples::BareAlgorithm("FatrasSimulation", lvl),
-      m_cfg(std::move(cfg)) {
+    : ActsExamples::IAlgorithm("FatrasSimulation", lvl), m_cfg(std::move(cfg)) {
   ACTS_DEBUG("hits on sensitive surfaces: " << m_cfg.generateHitsOnSensitive);
   ACTS_DEBUG("hits on material surfaces: " << m_cfg.generateHitsOnMaterial);
   ACTS_DEBUG("hits on passive surfaces: " << m_cfg.generateHitsOnPassive);
@@ -184,6 +202,10 @@ ActsExamples::FatrasSimulation::FatrasSimulation(Config cfg,
 
   // construct the simulation for the specific magnetic field
   m_sim = std::make_unique<FatrasSimulationT>(m_cfg, lvl);
+
+  m_inputParticles.initialize(m_cfg.inputParticles);
+  m_outputParticles.initialize(m_cfg.outputParticles);
+  m_outputSimHits.initialize(m_cfg.outputSimHits);
 }
 
 // explicit destructor needed for the PIMPL implementation to work
@@ -192,15 +214,21 @@ ActsExamples::FatrasSimulation::~FatrasSimulation() = default;
 ActsExamples::ProcessCode ActsExamples::FatrasSimulation::execute(
     const AlgorithmContext &ctx) const {
   // read input containers
-  const auto &inputParticles =
-      ctx.eventStore.get<SimParticleContainer>(m_cfg.inputParticles);
+  const auto &inputParticles = m_inputParticles(ctx);
 
   ACTS_DEBUG(inputParticles.size() << " input particles");
 
+  // prepare input container
+  std::vector<ActsFatras::Particle> particlesInput;
+  particlesInput.reserve(inputParticles.size());
+  for (const auto &p : inputParticles) {
+    particlesInput.push_back(p.initialState());
+  }
+
   // prepare output containers
-  SimParticleContainer::sequence_type particlesInitialUnordered;
-  SimParticleContainer::sequence_type particlesFinalUnordered;
-  SimHitContainer::sequence_type simHitsUnordered;
+  std::vector<ActsFatras::Particle> particlesInitialUnordered;
+  std::vector<ActsFatras::Particle> particlesFinalUnordered;
+  std::vector<ActsFatras::Hit> simHitsUnordered;
   // reserve appropriate resources
   particlesInitialUnordered.reserve(inputParticles.size());
   particlesFinalUnordered.reserve(inputParticles.size());
@@ -210,12 +238,12 @@ ActsExamples::ProcessCode ActsExamples::FatrasSimulation::execute(
   // run the simulation w/ a local random generator
   auto rng = m_cfg.randomNumbers->spawnGenerator(ctx);
   auto ret = m_sim->simulate(ctx.geoContext, ctx.magFieldContext, rng,
-                             inputParticles, particlesInitialUnordered,
+                             particlesInput, particlesInitialUnordered,
                              particlesFinalUnordered, simHitsUnordered);
   // fatal error leads to panic
-  if (not ret.ok()) {
+  if (!ret.ok()) {
     ACTS_FATAL("event " << ctx.eventNumber << " simulation failed with error "
-                        << ret.error());
+                        << ret.error().message());
     return ProcessCode::ABORT;
   }
   // failed particles are just logged. assumes that failed particles are due
@@ -233,19 +261,59 @@ ActsExamples::ProcessCode ActsExamples::FatrasSimulation::execute(
              << " simulated particles (final state)");
   ACTS_DEBUG(simHitsUnordered.size() << " simulated hits");
 
+  if (particlesInitialUnordered.size() != particlesFinalUnordered.size()) {
+    ACTS_ERROR("number of initial and final state particles differ");
+  }
+
   // order output containers
-  SimParticleContainer particlesInitial;
-  SimParticleContainer particlesFinal;
+#if BOOST_VERSION >= 107800
+  SimParticleStateContainer particlesInitial(particlesInitialUnordered.begin(),
+                                             particlesInitialUnordered.end());
+  SimParticleStateContainer particlesFinal(particlesFinalUnordered.begin(),
+                                           particlesFinalUnordered.end());
+  SimHitContainer simHits(simHitsUnordered.begin(), simHitsUnordered.end());
+#else
+  // working around a nasty boost bug
+  // https://github.com/boostorg/container/issues/244
+
+  SimParticleStateContainer particlesInitial;
+  SimParticleStateContainer particlesFinal;
   SimHitContainer simHits;
-  particlesInitial.insert(particlesInitialUnordered.begin(),
-                          particlesInitialUnordered.end());
-  particlesFinal.insert(particlesFinalUnordered.begin(),
-                        particlesFinalUnordered.end());
-  simHits.insert(simHitsUnordered.begin(), simHitsUnordered.end());
+
+  particlesInitial.reserve(particlesInitialUnordered.size());
+  particlesFinal.reserve(particlesFinalUnordered.size());
+  simHits.reserve(simHitsUnordered.size());
+
+  for (const auto &p : particlesInitialUnordered) {
+    particlesInitial.insert(p);
+  }
+  for (const auto &p : particlesFinalUnordered) {
+    particlesFinal.insert(p);
+  }
+  for (const auto &h : simHitsUnordered) {
+    simHits.insert(h);
+  }
+#endif
+
+  SimParticleContainer particlesSimulated;
+  particlesSimulated.reserve(particlesInitial.size());
+  for (const auto &particleInitial : particlesInitial) {
+    SimParticle particleSimulated(particleInitial, particleInitial);
+
+    if (auto it = particlesFinal.find(particleInitial.particleId());
+        it != particlesFinal.end()) {
+      particleSimulated.finalState() = *it;
+    } else {
+      ACTS_ERROR("particle " << particleInitial.particleId()
+                             << " has no final state");
+    }
+
+    particlesSimulated.insert(particleSimulated);
+  }
+
   // store ordered output containers
-  ctx.eventStore.add(m_cfg.outputParticlesInitial, std::move(particlesInitial));
-  ctx.eventStore.add(m_cfg.outputParticlesFinal, std::move(particlesFinal));
-  ctx.eventStore.add(m_cfg.outputSimHits, std::move(simHits));
+  m_outputParticles(ctx, std::move(particlesSimulated));
+  m_outputSimHits(ctx, std::move(simHits));
 
   return ActsExamples::ProcessCode::SUCCESS;
 }

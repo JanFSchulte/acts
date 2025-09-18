@@ -3,7 +3,12 @@ from pathlib import Path
 from typing import Optional
 
 import acts
-from acts.examples import Sequencer, ParticleSelector, ParticleSmearing, TrackSelector
+from acts.examples import (
+    Sequencer,
+    ParticleSelector,
+    TrackParameterSmearing,
+    TrackParameterSelector,
+)
 from acts.examples.simulation import addPythia8
 from acts.examples.reconstruction import (
     addVertexFitting,
@@ -28,7 +33,7 @@ def runVertexFitting(
 
     rnd = acts.examples.RandomNumbers(seed=42)
 
-    inputParticles = "particles_input"
+    inputParticles = "particles_generated"
     if inputParticlePath is None:
         logger.info("Generating particles using Pythia8")
         addPythia8(s, rnd)
@@ -39,8 +44,7 @@ def runVertexFitting(
             acts.examples.RootParticleReader(
                 level=acts.logging.INFO,
                 filePath=str(inputParticlePath.resolve()),
-                particleCollection=inputParticles,
-                orderedEvents=False,
+                outputParticles=inputParticles,
             )
         )
 
@@ -61,9 +65,16 @@ def runVertexFitting(
     if inputTrackSummary is None or inputParticlePath is None:
         logger.info("Using smeared particles")
 
-        ptclSmearing = ParticleSmearing(
-            level=acts.logging.INFO,
+        trkParamExtractor = acts.examples.ParticleTrackParamExtractor(
+            level=acts.logging.WARNING,
             inputParticles=selectedParticles,
+            outputTrackParameters="params_particles_generated",
+        )
+        s.addAlgorithm(trkParamExtractor)
+
+        ptclSmearing = TrackParameterSmearing(
+            level=acts.logging.INFO,
+            inputTrackParameters="params_particles_generated",
             outputTrackParameters=trackParameters,
             randomNumbers=rnd,
         )
@@ -73,26 +84,24 @@ def runVertexFitting(
         logger.info("Reading track summary from %s", inputTrackSummary.resolve())
         assert inputTrackSummary.exists()
         associatedParticles = "associatedTruthParticles"
-        trackSummaryReader = acts.examples.RootTrajectorySummaryReader(
+        trackSummaryReader = acts.examples.RootTrackSummaryReader(
             level=acts.logging.VERBOSE,
             outputTracks=trackParameters,
             outputParticles=associatedParticles,
             filePath=str(inputTrackSummary.resolve()),
-            orderedEvents=False,
         )
         s.addReader(trackSummaryReader)
 
-        trackSelector = TrackSelector(
+        trackParamSelector = TrackParameterSelector(
             level=acts.logging.INFO,
             inputTrackParameters=trackSummaryReader.config.outputTracks,
             outputTrackParameters="selectedTrackParameters",
-            removeNeutral=True,
             absEtaMax=2.5,
             loc0Max=4.0 * u.mm,  # rho max
             ptMin=500 * u.MeV,
         )
-        s.addAlgorithm(trackSelector)
-        trackParameters = trackSelector.config.outputTrackParameters
+        s.addAlgorithm(trackParamSelector)
+        trackParameters = trackParamSelector.config.outputTrackParameters
 
     logger.info("Using vertex finder: %s", vertexFinder.name)
 
@@ -110,7 +119,8 @@ def runVertexFitting(
 
 
 if "__main__" == __name__:
-    detector, trackingGeometry, decorators = acts.examples.GenericDetector.create()
+    detector = acts.examples.GenericDetector()
+    trackingGeometry = detector.trackingGeometry()
 
     field = acts.ConstantBField(acts.Vector3(0, 0, 2 * u.T))
 

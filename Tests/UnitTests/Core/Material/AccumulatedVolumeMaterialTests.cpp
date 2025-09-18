@@ -1,19 +1,21 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Material/AccumulatedVolumeMaterial.hpp"
 #include "Acts/Material/Material.hpp"
+#include "Acts/Material/MaterialSlab.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 
-namespace Acts {
-namespace Test {
+#include <cmath>
+
+namespace Acts::Test {
 
 BOOST_AUTO_TEST_SUITE(accumulated_material)
 
@@ -21,11 +23,11 @@ BOOST_AUTO_TEST_CASE(vacuum) {
   AccumulatedVolumeMaterial avm;
 
   // averaging over nothing is vacuum
-  BOOST_CHECK(not avm.average());
+  BOOST_CHECK(avm.average().isVacuum());
 
   // averaging over vacuum is still vacuum
-  avm.accumulate(MaterialSlab(1));
-  BOOST_CHECK(not avm.average());
+  avm.accumulate(MaterialSlab::Vacuum(1));
+  BOOST_CHECK(avm.average().isVacuum());
 }
 
 BOOST_AUTO_TEST_CASE(single_material) {
@@ -45,7 +47,7 @@ BOOST_AUTO_TEST_CASE(single_material) {
     CHECK_CLOSE_REL(result.massDensity(), mat.massDensity(), 1e-4);
   }
   // adding a vacuum step changes the average
-  avm.accumulate(MaterialSlab(1));
+  avm.accumulate(MaterialSlab::Vacuum(1));
   {
     auto result = avm.average();
     // less scattering in vacuum, larger radiation length
@@ -103,5 +105,4 @@ BOOST_AUTO_TEST_CASE(two_materials_different_lengh) {
 
 BOOST_AUTO_TEST_SUITE_END()
 
-}  // namespace Test
-}  // namespace Acts
+}  // namespace Acts::Test

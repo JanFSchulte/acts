@@ -1,20 +1,25 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include "Acts/Digitization/PlanarModuleStepper.hpp"
-#include "Acts/Plugins/Python/Utilities.hpp"
+#include "Acts/Utilities/Logger.hpp"
 #include "ActsExamples/Digitization/DigitizationAlgorithm.hpp"
 #include "ActsExamples/Digitization/DigitizationConfig.hpp"
 #include "ActsExamples/Digitization/DigitizationConfigurator.hpp"
-#include "ActsExamples/Digitization/PlanarSteppingAlgorithm.hpp"
+#include "ActsExamples/Digitization/DigitizationCoordinatesConverter.hpp"
+#include "ActsExamples/Digitization/MuonSpacePointDigitizer.hpp"
 #include "ActsExamples/Io/Json/JsonDigitizationConfig.hpp"
+#include "ActsPython/Utilities/Helpers.hpp"
+#include "ActsPython/Utilities/Macros.hpp"
 
+#include <array>
 #include <memory>
+#include <tuple>
+#include <utility>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -24,90 +29,56 @@ namespace py = pybind11;
 using namespace ActsExamples;
 using namespace Acts;
 
-namespace Acts::Python {
+namespace ActsPython {
 
 void addDigitization(Context& ctx) {
   auto [m, mex] = ctx.get("main", "examples");
 
-  mex.def("readDigiConfigFromJson", ActsExamples::readDigiConfigFromJson);
-  mex.def("writeDigiConfigToJson", ActsExamples::writeDigiConfigToJson);
+  mex.def("readDigiConfigFromJson", readDigiConfigFromJson);
+  mex.def("writeDigiConfigToJson", writeDigiConfigToJson);
 
   {
-    using Config = ActsExamples::DigitizationConfig;
+    using Config = DigitizationAlgorithm::Config;
 
-    py::class_<ActsExamples::DigitizationAlgorithm, ActsExamples::BareAlgorithm,
-               std::shared_ptr<ActsExamples::DigitizationAlgorithm>>(
-        mex, "DigitizationAlgorithm")
-        .def(py::init<Config&, Acts::Logging::Level>(), py::arg("config"),
-             py::arg("level"))
-        .def_property_readonly("config",
-                               &ActsExamples::DigitizationAlgorithm::config);
+    auto a =
+        py::class_<DigitizationAlgorithm, IAlgorithm,
+                   std::shared_ptr<DigitizationAlgorithm>>(
+            mex, "DigitizationAlgorithm")
+            .def(py::init<Config&, Logging::Level>(), py::arg("config"),
+                 py::arg("level"))
+            .def_property_readonly("config", &DigitizationAlgorithm::config);
 
-    auto c = py::class_<Config>(mex, "DigitizationConfig")
-                 .def(py::init<Acts::GeometryHierarchyMap<
-                          ActsExamples::DigiComponentsConfig>>());
+    auto c = py::class_<Config>(a, "Config").def(py::init<>());
 
-    ACTS_PYTHON_STRUCT_BEGIN(c, Config);
-    ACTS_PYTHON_MEMBER(inputSimHits);
-    ACTS_PYTHON_MEMBER(outputSourceLinks);
-    ACTS_PYTHON_MEMBER(outputMeasurements);
-    ACTS_PYTHON_MEMBER(outputClusters);
-    ACTS_PYTHON_MEMBER(outputMeasurementParticlesMap);
-    ACTS_PYTHON_MEMBER(outputMeasurementSimHitsMap);
-    ACTS_PYTHON_MEMBER(trackingGeometry);
-    ACTS_PYTHON_MEMBER(randomNumbers);
-    ACTS_PYTHON_MEMBER(doMerge);
-    ACTS_PYTHON_MEMBER(digitizationConfigs);
-    ACTS_PYTHON_STRUCT_END();
+    ACTS_PYTHON_STRUCT(
+        c, inputSimHits, outputMeasurements, outputClusters,
+        outputMeasurementParticlesMap, outputMeasurementSimHitsMap,
+        outputParticleMeasurementsMap, outputSimHitMeasurementsMap,
+        surfaceByIdentifier, randomNumbers, doOutputCells, doClusterization,
+        doMerge, minEnergyDeposit, digitizationConfigs, minMaxRetries);
 
     c.def_readonly("mergeNsigma", &Config::mergeNsigma);
     c.def_readonly("mergeCommonCorner", &Config::mergeCommonCorner);
 
     patchKwargsConstructor(c);
 
-    py::class_<DigiComponentsConfig>(mex, "DigiComponentsConfig");
+    auto cc = py::class_<DigiComponentsConfig>(mex, "DigiComponentsConfig")
+                  .def(py::init<>());
 
-    py::class_<Acts::GeometryHierarchyMap<ActsExamples::DigiComponentsConfig>>(
-        mex, "GeometryHierarchyMap_DigiComponentsConfig")
+    ACTS_PYTHON_STRUCT(cc, geometricDigiConfig, smearingDigiConfig);
+
+    py::class_<DigiConfigContainer>(mex, "DigiConfigContainer")
         .def(py::init<std::vector<
                  std::pair<GeometryIdentifier, DigiComponentsConfig>>>());
   }
 
-  {
-    using Alg = ActsExamples::PlanarSteppingAlgorithm;
+  ACTS_PYTHON_DECLARE_ALGORITHM(
+      MuonSpacePointDigitizer, mex, "MuonSpacePointDigitizer", inputSimHits,
+      inputParticles, outputSpacePoints, randomNumbers,
+      /// @todo: Expose <calibrator> to python bindings
+      trackingGeometry, digitizeTime, dumpVisualization, strawDeadTime
 
-    auto alg =
-        py::class_<Alg, ActsExamples::BareAlgorithm, std::shared_ptr<Alg>>(
-            mex, "PlanarSteppingAlgorithm")
-            .def(py::init<const Alg::Config&, Acts::Logging::Level>(),
-                 py::arg("config"), py::arg("level"))
-            .def_property_readonly("config", &Alg::config);
-
-    auto c = py::class_<Alg::Config>(alg, "Config").def(py::init<>());
-
-    ACTS_PYTHON_STRUCT_BEGIN(c, Alg::Config);
-    ACTS_PYTHON_MEMBER(inputSimHits);
-    ACTS_PYTHON_MEMBER(outputClusters);
-    ACTS_PYTHON_MEMBER(outputSourceLinks);
-    ACTS_PYTHON_MEMBER(outputDigiSourceLinks);
-    ACTS_PYTHON_MEMBER(outputMeasurements);
-    ACTS_PYTHON_MEMBER(outputMeasurementParticlesMap);
-    ACTS_PYTHON_MEMBER(outputMeasurementSimHitsMap);
-    ACTS_PYTHON_MEMBER(trackingGeometry);
-    ACTS_PYTHON_MEMBER(planarModuleStepper);
-    ACTS_PYTHON_MEMBER(randomNumbers);
-    ACTS_PYTHON_STRUCT_END();
-  }
-
-  {
-    py::class_<PlanarModuleStepper, std::shared_ptr<PlanarModuleStepper>>(
-        m, "PlanarModuleStepper")
-        .def(py::init<>())
-        .def(py::init([](Logging::Level level) {
-          return std::make_shared<PlanarModuleStepper>(
-              getDefaultLogger("PlanarModuleStepper", level));
-        }));
-  }
+  );
 
   {
     using DC = DigitizationConfigurator;
@@ -115,13 +86,20 @@ void addDigitization(Context& ctx) {
 
     dc.def("__call__", &DC::operator());
 
-    ACTS_PYTHON_STRUCT_BEGIN(dc, DC);
-    ACTS_PYTHON_MEMBER(inputDigiComponents);
-    ACTS_PYTHON_MEMBER(compactify);
-    ACTS_PYTHON_MEMBER(volumeLayerComponents);
-    ACTS_PYTHON_MEMBER(outputDigiComponents);
-    ACTS_PYTHON_STRUCT_END();
+    ACTS_PYTHON_STRUCT(dc, inputDigiComponents, compactify,
+                       volumeLayerComponents, outputDigiComponents);
+  }
+
+  {
+    py::class_<DigitizationCoordinatesConverter,
+               std::shared_ptr<DigitizationCoordinatesConverter>>(
+        mex, "DigitizationCoordinatesConverter")
+        .def(py::init<DigitizationAlgorithm::Config&>(), py::arg("config"))
+        .def_property_readonly("config",
+                               &DigitizationCoordinatesConverter::config)
+        .def("globalToLocal", &DigitizationCoordinatesConverter::globalToLocal)
+        .def("localToGlobal", &DigitizationCoordinatesConverter::localToGlobal);
   }
 }
 
-}  // namespace Acts::Python
+}  // namespace ActsPython

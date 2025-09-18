@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <TROOT.h>
 
@@ -57,7 +57,7 @@ void Draw_ratio(TCanvas* c, TProfile* h1, TProfile* h2, TLegend* leg, std::strin
   h5->SetStats(0);      // No statistics on lower plot
   h5->Divide(h1);
 
-  double maxi = min( max( fabs(h5->GetMinimum()-0.1*h5->GetMinimum()),h5->GetMaximum()+0.1*h5->GetMaximum() ), 10. );
+  double maxi = min( max( std::abs(h5->GetMinimum()-0.1*h5->GetMinimum()),h5->GetMaximum()+0.1*h5->GetMaximum() ), 10. );
 
   h5->SetMinimum( 0.5 );  // Define Y ..
   h5->SetMaximum( 1.1 ); // .. range
@@ -90,7 +90,7 @@ void Draw_ratio(TCanvas* c, TProfile* h1, TProfile* h2, TLegend* leg, std::strin
 
 }
 
-/// Compare two set of material tracks (for exemple one obtain with propagator and material map and one with geantino scan).
+/// Compare two set of material tracks (for example one obtain with propagator and material map and one with geantino scan).
 /// Draw the ammont of material (in X0) encounter by tracks as function of eta and phi.
 /// Plot the ratio between the two set to help identify inconsistency.
 
@@ -145,7 +145,7 @@ void Mat_map(std::string Val = "", std::string geantino = "", std::string name =
 
     // 2D map for Validation input
     TCanvas *VM = new TCanvas("VM","Validation Map") ;
-    Val_file->Draw("mat_y:mat_z","fabs(mat_x)<1");
+    Val_file->Draw("mat_y:mat_z","std::abs(mat_x)<1");
 
     eta_0->Draw("Same");
     eta_1p->Draw("Same");
@@ -178,7 +178,7 @@ void Mat_map(std::string Val = "", std::string geantino = "", std::string name =
 
     // X0 as function of Phi for Validation input
     TCanvas *VM_X0_Phi = new TCanvas("VM_X0_Phi","Validation X0 Phi") ;
-    Val_file->Draw("t_X0:v_phi>>Val_X0_Phi","exp(-v_eta)/(1+exp(-2*v_eta))","profile");
+    Val_file->Draw("t_X0:v_phi>>Val_X0_Phi","","profile");
     Val_X0_Phi->SetMarkerStyle(7);
     Val_X0_Phi->Draw("HIST PC");
     Val_X0_Phi->GetXaxis()->SetTitle("Phi");
@@ -187,7 +187,7 @@ void Mat_map(std::string Val = "", std::string geantino = "", std::string name =
 
     // X0 as function of Phi for Validation input
     TCanvas *VM_X0_Phi_spread = new TCanvas("VM_X0_Phi_spread","Validation X0 Phi") ;
-    Val_file->Draw("t_X0:v_phi>>Val_X0_Phi_spread","exp(-v_eta)/(1+exp(-2*v_eta))","");
+    Val_file->Draw("t_X0:v_phi>>Val_X0_Phi_spread","","");
     Val_X0_Phi_spread->GetXaxis()->SetTitle("Phi");
     Val_X0_Phi_spread->GetYaxis()->SetTitle("X0");
     VM_X0_Phi_spread->Print( (name+"/Val_mat_Phi_X0_spread.pdf").c_str());
@@ -206,7 +206,7 @@ void Mat_map(std::string Val = "", std::string geantino = "", std::string name =
 
     // 2D map for Geantino input
     TCanvas *GM = new TCanvas("GM","Geantino Map") ;
-    geantino_file->Draw("mat_y:mat_z","fabs(mat_x)<1");
+    geantino_file->Draw("mat_y:mat_z","std::abs(mat_x)<1");
 
     eta_0->Draw("Same");
     eta_1p->Draw("Same");
@@ -235,7 +235,7 @@ void Mat_map(std::string Val = "", std::string geantino = "", std::string name =
     geantino_file->Draw("t_X0:v_eta>>geantino_X0_Eta_spread","","");
     geantino_X0_Eta_spread->GetXaxis()->SetTitle("Eta");
     geantino_X0_Eta_spread->GetYaxis()->SetTitle("X0");
-    GM_X0_Eta->Print( (name+"/geant_mat_Eta_X0_spread.pdf").c_str());
+    GM_X0_Eta_spread->Print( (name+"/geant_mat_Eta_X0_spread.pdf").c_str());
 
     // X0 as function of Phi for Geantino input
     TCanvas *GM_X0_Phi = new TCanvas("GM_X0_Phi","Geantino X0 Phi") ;
@@ -251,7 +251,7 @@ void Mat_map(std::string Val = "", std::string geantino = "", std::string name =
     geantino_file->Draw("t_X0:v_phi>>geantino_X0_Phi_spread","","");
     geantino_X0_Phi_spread->GetXaxis()->SetTitle("Phi");
     geantino_X0_Phi_spread->GetYaxis()->SetTitle("X0");
-    GM_X0_Phi->Print( (name+"/geant_mat_Phi_X0_spread.pdf").c_str());
+    GM_X0_Phi_spread->Print( (name+"/geant_mat_Phi_X0_spread.pdf").c_str());
 
     // 2D map of X0 for Geantino input
     TCanvas *GM_2D = new TCanvas("GM_2D","Geantino X0 2D") ;

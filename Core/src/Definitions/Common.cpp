@@ -1,33 +1,19 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Definitions/Common.hpp"
 
+#include <cassert>
+#include <cstdlib>
 #include <ostream>
 
-namespace Acts {
-
-std::ostream& operator<<(std::ostream& os, NavigationDirection navDir) {
-  switch (navDir) {
-    case NavigationDirection::Forward:
-      os << "forward";
-      break;
-    case NavigationDirection::Backward:
-      os << "backward";
-      break;
-    default:
-      assert(false && "Invalid direction (shouldn't happen)");
-      std::abort();
-  }
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, MaterialUpdateStage matUpdate) {
+std::ostream& Acts::operator<<(std::ostream& os,
+                               MaterialUpdateStage matUpdate) {
   switch (matUpdate) {
     case MaterialUpdateStage::PreUpdate:
       os << "PreUpdate (-1)";
@@ -44,5 +30,3 @@ std::ostream& operator<<(std::ostream& os, MaterialUpdateStage matUpdate) {
   }
   return os;
 }
-
-}  // namespace Acts

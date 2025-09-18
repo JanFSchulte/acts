@@ -1,28 +1,38 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Io/Csv/CsvTrackingGeometryWriter.hpp"
 
+#include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Definitions/Units.hpp"
-#include "Acts/Digitization/CartesianSegmentation.hpp"
-#include "Acts/Digitization/DigitizationModule.hpp"
 #include "Acts/Geometry/BoundarySurfaceT.hpp"
+#include "Acts/Geometry/GeometryContext.hpp"
+#include "Acts/Geometry/GeometryIdentifier.hpp"
+#include "Acts/Geometry/Layer.hpp"
+#include "Acts/Geometry/TrackingGeometry.hpp"
 #include "Acts/Geometry/TrackingVolume.hpp"
+#include "Acts/Geometry/Volume.hpp"
 #include "Acts/Geometry/VolumeBounds.hpp"
-#include "Acts/Plugins/Identification/IdentifiedDetectorElement.hpp"
 #include "Acts/Surfaces/Surface.hpp"
+#include "Acts/Surfaces/SurfaceArray.hpp"
+#include "Acts/Surfaces/SurfaceBounds.hpp"
+#include "Acts/Utilities/BinnedArray.hpp"
+#include "Acts/Utilities/IAxis.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
+#include "ActsExamples/Io/Csv/CsvInputOutput.hpp"
 #include "ActsExamples/Utilities/Paths.hpp"
 
-#include <iostream>
-#include <sstream>
+#include <array>
+#include <cstddef>
 #include <stdexcept>
-
-#include <dfe/dfe_io_dsv.hpp>
+#include <utility>
+#include <vector>
 
 #include "CsvOutputData.hpp"
 
@@ -34,7 +44,7 @@ CsvTrackingGeometryWriter::CsvTrackingGeometryWriter(
       m_logger(Acts::getDefaultLogger("CsvTrackingGeometryWriter", level))
 
 {
-  if (not m_cfg.trackingGeometry) {
+  if (!m_cfg.trackingGeometry) {
     throw std::invalid_argument("Missing tracking geometry");
   }
   m_world = m_cfg.trackingGeometry->highestTrackingVolume();
@@ -49,9 +59,9 @@ std::string CsvTrackingGeometryWriter::name() const {
 
 namespace {
 
-using SurfaceWriter = dfe::NamedTupleCsvWriter<SurfaceData>;
-using SurfaceGridWriter = dfe::NamedTupleCsvWriter<SurfaceGridData>;
-using LayerVolumeWriter = dfe::NamedTupleCsvWriter<LayerVolumeData>;
+using SurfaceWriter = ActsExamples::NamedTupleCsvWriter<SurfaceData>;
+using SurfaceGridWriter = ActsExamples::NamedTupleCsvWriter<SurfaceGridData>;
+using LayerVolumeWriter = ActsExamples::NamedTupleCsvWriter<LayerVolumeData>;
 using BoundarySurface = Acts::BoundarySurfaceT<Acts::TrackingVolume>;
 
 /// Write a single surface.
@@ -63,6 +73,7 @@ void fillSurfaceData(SurfaceData& data, const Acts::Surface& surface,
   data.boundary_id = surface.geometryId().boundary();
   data.layer_id = surface.geometryId().layer();
   data.module_id = surface.geometryId().sensitive();
+  data.extra_id = surface.geometryId().extra();
   // center position
   auto center = surface.center(geoCtx);
   data.cx = center.x() / Acts::UnitConstants::mm;
@@ -94,30 +105,13 @@ void fillSurfaceData(SurfaceData& data, const Acts::Surface& surface,
         "Bound types with too many parameters. Should never happen.");
   }
 
-  for (size_t ipar = 0; ipar < boundValues.size(); ++ipar) {
+  for (std::size_t ipar = 0; ipar < boundValues.size(); ++ipar) {
     (*dataBoundParameters[ipar]) = boundValues[ipar];
   }
 
   if (surface.associatedDetectorElement() != nullptr) {
     data.module_t = surface.associatedDetectorElement()->thickness() /
                     Acts::UnitConstants::mm;
-
-    const auto* detElement =
-        dynamic_cast<const Acts::IdentifiedDetectorElement*>(
-            surface.associatedDetectorElement());
-
-    if (detElement != nullptr and detElement->digitizationModule()) {
-      auto dModule = detElement->digitizationModule();
-      // dynamic_cast to CartesianSegmentation
-      const auto* cSegmentation =
-          dynamic_cast<const Acts::CartesianSegmentation*>(
-              &(dModule->segmentation()));
-      if (cSegmentation != nullptr) {
-        auto pitch = cSegmentation->pitch();
-        data.pitch_u = pitch.first / Acts::UnitConstants::mm;
-        data.pitch_v = pitch.second / Acts::UnitConstants::mm;
-      }
-    }
   }
 }
 
@@ -135,12 +129,12 @@ void writeSurface(SurfaceWriter& sfWriter, const Acts::Surface& surface,
 /// @param transform the layer transform
 /// @param representingBoundValues [in,out] the bound values
 /// @param last is the last layer
-void writeCylinderLayerVolume(
-    LayerVolumeWriter& lvWriter, const Acts::Layer& lv,
-    const Acts::Transform3& transform,
-    std::vector<Acts::ActsScalar>& representingBoundValues,
-    std::vector<Acts::ActsScalar>& volumeBoundValues,
-    std::vector<Acts::ActsScalar>& lastBoundValues, bool last) {
+void writeCylinderLayerVolume(LayerVolumeWriter& lvWriter,
+                              const Acts::Layer& lv,
+                              const Acts::Transform3& transform,
+                              std::vector<double>& representingBoundValues,
+                              std::vector<double>& volumeBoundValues,
+                              std::vector<double>& lastBoundValues, bool last) {
   // The layer volume to be written
   LayerVolumeData lvDims;
   lvDims.geometry_id = lv.geometryId().value();
@@ -236,9 +230,8 @@ void writeVolume(SurfaceWriter& sfWriter, SurfaceGridWriter& sfGridWriter,
     const auto& vTransform = volume.transform();
 
     // Get the values of the volume boundaries
-    std::vector<Acts::ActsScalar> volumeBoundValues =
-        volume.volumeBounds().values();
-    std::vector<Acts::ActsScalar> lastBoundValues;
+    std::vector<double> volumeBoundValues = volume.volumeBounds().values();
+    std::vector<double> lastBoundValues;
 
     if (volume.volumeBounds().type() == Acts::VolumeBounds::eCylinder) {
       auto vTranslation = vTransform.translation();
@@ -259,7 +252,7 @@ void writeVolume(SurfaceWriter& sfWriter, SurfaceGridWriter& sfGridWriter,
 
     // If we only have three layers, then the volume is the layer volume
     // so let's write it - this case will be excluded afterwards
-    if (layers.size() == 3 and writeLayerVolume) {
+    if (layers.size() == 3 && writeLayerVolume) {
       auto slayer = layers[1];
       LayerVolumeData plvDims;
       plvDims.geometry_id = slayer->geometryId().value();
@@ -290,9 +283,9 @@ void writeVolume(SurfaceWriter& sfWriter, SurfaceGridWriter& sfGridWriter,
         const auto* rVolume = layer->representingVolume();
 
         // Write the layer volume, exclude single layer volumes (written above)
-        if (rVolume != nullptr and writeLayerVolume and layers.size() > 3) {
+        if (rVolume != nullptr && writeLayerVolume && layers.size() > 3) {
           // Get the values of the representing volume
-          std::vector<Acts::ActsScalar> representingBoundValues =
+          std::vector<double> representingBoundValues =
               rVolume->volumeBounds().values();
           if (rVolume->volumeBounds().type() == Acts::VolumeBounds::eCylinder) {
             bool last = (layerIdx + 2 ==
@@ -317,17 +310,16 @@ void writeVolume(SurfaceWriter& sfWriter, SurfaceGridWriter& sfGridWriter,
             // Draw the grid itself
             auto binning = sfArray->binningValues();
             auto axes = sfArray->getAxes();
-            if (not binning.empty() and binning.size() == 2 and
-                axes.size() == 2) {
+            if (!binning.empty() && binning.size() == 2 && axes.size() == 2) {
               auto loc0Values = axes[0]->getBinEdges();
               sfGrid.nbins_loc0 = loc0Values.size() - 1;
-              sfGrid.type_loc0 = int(binning[0]);
+              sfGrid.type_loc0 = static_cast<int>(binning[0]);
               sfGrid.min_loc0 = loc0Values[0];
               sfGrid.max_loc0 = loc0Values[loc0Values.size() - 1];
 
               auto loc1Values = axes[1]->getBinEdges();
               sfGrid.nbins_loc1 = loc1Values.size() - 1;
-              sfGrid.type_loc1 = int(binning[1]);
+              sfGrid.type_loc1 = static_cast<int>(binning[1]);
               sfGrid.min_loc1 = loc1Values[0];
               sfGrid.max_loc1 = loc1Values[loc1Values.size() - 1];
             }
@@ -360,16 +352,15 @@ void writeVolume(SurfaceWriter& sfWriter, SurfaceGridWriter& sfGridWriter,
   // step down into hierarchy to process all child volumnes
   if (volume.confinedVolumes()) {
     for (const auto& confined : volume.confinedVolumes()->arrayObjects()) {
-      writeVolume(sfWriter, sfGridWriter, lvWriter, *confined.get(),
-                  writeSensitive, writeBoundary, writeSurfaceGrid,
-                  writeLayerVolume, geoCtx);
+      writeVolume(sfWriter, sfGridWriter, lvWriter, *confined, writeSensitive,
+                  writeBoundary, writeSurfaceGrid, writeLayerVolume, geoCtx);
     }
   }
 }
 }  // namespace
 
 ProcessCode CsvTrackingGeometryWriter::write(const AlgorithmContext& ctx) {
-  if (not m_cfg.writePerEvent) {
+  if (!m_cfg.writePerEvent) {
     return ProcessCode::SUCCESS;
   }
 
@@ -391,7 +382,7 @@ ProcessCode CsvTrackingGeometryWriter::write(const AlgorithmContext& ctx) {
   return ProcessCode::SUCCESS;
 }
 
-ProcessCode CsvTrackingGeometryWriter::endRun() {
+ProcessCode CsvTrackingGeometryWriter::finalize() {
   SurfaceWriter sfWriter(joinPaths(m_cfg.outputDir, "detectors.csv"),
                          m_cfg.outputPrecision);
   SurfaceGridWriter sfGridWriter(

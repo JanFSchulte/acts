@@ -1,22 +1,22 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Geometry/BoundarySurfaceFace.hpp"
 #include "Acts/Geometry/Volume.hpp"
 #include "Acts/Geometry/VolumeBounds.hpp"
 
 #include <array>
-#include <iomanip>
 #include <iosfwd>
 #include <memory>
-#include <stdexcept>
+#include <ostream>
 #include <vector>
 
 namespace Acts {
@@ -46,9 +46,43 @@ class TrapezoidBounds;
 ///  - positiveFaceZX     [5] : Rectangular  Acts::PlaneSurface,
 ///                             parallel to \f$ zx \f$ plane at positive \f$y\f$
 ///
+/// ```
+/// PositiveZFaceXY--------+          PositiveYFaceZX
+///                        |                   |
+/// TrapezoidFaceAlpha     |                   v
+///          |             | +----------------------------------+
+///          |             v |                                  |
+///          |    +       +--+------------------------------++  |
+///          |   /|      /   |                            +-+   |
+///          |  / |     /    |                          +-+     |           +
+///      +---+ /  |    /     |                        +-+       |          ++
+///      |    /   |   /      +----------------------+-+---------+        +-+|
+///      |   /    |  /                            +-+                  +-+  |
+///      |  /     + /                           +-+                  +-+    |
+///      | /     / /                          +-+                  +-+      |
+///      v/     / /                         +-+                  +-+        +
+///      /     / /                        +-+                  +-+         +-
+///     /     / /    +------------------+-+------------++    +-+         +-+
+///    /     / /    /                 +-+            +-+   +-+         +-+
+///   /     / /    /                +-+            +-+   +-+         +-+
+///  /     / +----X-----------------+            +-+   +-+         +-+
+/// +     /      /                             +-+   +-+         +-+
+/// | +--X------X------------+               +-+    -+         +-+
+/// | | /      /             |             +-+     +         +-+
+/// | |/      /              |           +-+       |       +-+  ^
+/// | X      /               |         +-+         |     +-+    |
+/// |/|     /                |       +-+           |   +-+      |
+/// + |    /                 |     +-+             | +-+        |  z ^   ^ y
+///   +---X------------------+   +-+  ^            |-+    +-----+    |  /
+///      /        ^            +-+    |            +      |          | /
+///     +---------++-----------+      |                   |          |/
+///                |                  |                   |          X------> x
+///       NegativeYFaceZX      NegativeZFaceXY            |
+///                                              TrapezoidFaceBeta
+/// ```
 class TrapezoidVolumeBounds : public VolumeBounds {
  public:
-  /// @enum BoundValues for acces / streaming
+  /// @enum BoundValues for access / streaming
   enum BoundValues : unsigned int {
     eHalfLengthXnegY = 0,  //!< halflength in x at negative y
     eHalfLengthXposY = 1,  //!< halflength in x at positive y
@@ -57,6 +91,25 @@ class TrapezoidVolumeBounds : public VolumeBounds {
     eAlpha = 4,            //!< opening angle alpha (in point A)
     eBeta = 5,             //!< opening angle beta  (in point B)
     eSize                  //!< length of the bounds vector
+  };
+
+  /// Enum describing the possible faces of a trapezoidal volume
+  /// @note These values are synchronized with the BoundarySurfaceFace enum.
+  ///       Once Gen1 is removed, this can be changed.
+  enum class Face : unsigned int {
+
+    NegativeZFaceXY = BoundarySurfaceFace::negativeFaceXY,
+    PositiveZFaceXY = BoundarySurfaceFace::positiveFaceXY,
+    TrapezoidFaceAlpha =
+        BoundarySurfaceFace::trapezoidFaceAlpha,  // Acts::PlaneSurface attached
+                                                  // to [0] and [1] at negative
+                                                  // x
+    TrapezoidFaceBeta =
+        BoundarySurfaceFace::trapezoidFaceBeta,  // Acts::PlaneSurface attached
+                                                 // to [0] and [1] at positive x
+    NegativeYFaceZX = BoundarySurfaceFace::negativeFaceZX,
+    PositiveYFaceZX = BoundarySurfaceFace::positiveFaceZX
+
   };
 
   TrapezoidVolumeBounds() = delete;
@@ -75,15 +128,16 @@ class TrapezoidVolumeBounds : public VolumeBounds {
   /// @param minhalex is the half length in x at minimal y
   /// @param haley is the half length in y
   /// @param halez is the half length in z
-  /// @param alpha is the openeing angle at -x,-y
-  /// @param beta is the openeing angle at +x,-y
+  /// @param alpha is the opening angle at -x,-y
+  /// @param beta is the opening angle at +x,-y
   TrapezoidVolumeBounds(double minhalex, double haley, double halez,
                         double alpha, double beta) noexcept(false);
 
   /// Constructor - from a fixed size array
   ///
   /// @param values The bound values
-  TrapezoidVolumeBounds(const std::array<double, eSize>& values) noexcept(false)
+  explicit TrapezoidVolumeBounds(
+      const std::array<double, eSize>& values) noexcept(false)
       : m_values(values) {
     checkConsistency();
     buildSurfaceBounds();
@@ -122,7 +176,7 @@ class TrapezoidVolumeBounds : public VolumeBounds {
   /// It will throw an exception if the orientation prescription is not adequate
   ///
   /// @return a vector of surfaces bounding this volume
-  OrientedSurfaces orientedSurfaces(
+  std::vector<OrientedSurface> orientedSurfaces(
       const Transform3& transform = Transform3::Identity()) const override;
 
   /// Construct bounding box for this shape
@@ -135,7 +189,8 @@ class TrapezoidVolumeBounds : public VolumeBounds {
                                   const Volume* entity = nullptr) const final;
 
   /// Output Method for std::ostream
-  std::ostream& toStream(std::ostream& sl) const override;
+  /// @param os is the output stream
+  std::ostream& toStream(std::ostream& os) const override;
 
   /// Access to the bound values
   /// @param bValue the class nested enum for the array access
@@ -161,43 +216,6 @@ class TrapezoidVolumeBounds : public VolumeBounds {
 
   /// Helper method to create the surface bounds
   void buildSurfaceBounds();
-
-  /// Templated dump methos
-  /// @tparam stream_t The type of the stream for dumping
-  /// @param dt The stream object
-  template <class stream_t>
-  stream_t& dumpT(stream_t& dt) const;
 };
-
-template <class stream_t>
-stream_t& TrapezoidVolumeBounds::dumpT(stream_t& dt) const {
-  dt << std::setiosflags(std::ios::fixed);
-  dt << std::setprecision(5);
-  dt << "Acts::TrapezoidVolumeBounds: (minhalfX, halfY, halfZ, alpha, beta) "
-        "= ";
-  dt << "(" << get(eHalfLengthXnegY) << ", " << get(eHalfLengthXposY) << ", "
-     << get(eHalfLengthY) << ", " << get(eHalfLengthZ);
-  dt << ", " << get(eAlpha) << ", " << get(eBeta) << ")";
-  return dt;
-}
-
-inline std::vector<double> TrapezoidVolumeBounds::values() const {
-  std::vector<double> valvector;
-  valvector.insert(valvector.begin(), m_values.begin(), m_values.end());
-  return valvector;
-}
-
-inline void TrapezoidVolumeBounds::checkConsistency() noexcept(false) {
-  if (get(eHalfLengthXnegY) < 0. or get(eHalfLengthXposY) < 0.) {
-    throw std::invalid_argument(
-        "TrapezoidVolumeBounds: invalid trapezoid parameters in x.");
-  }
-  if (get(eHalfLengthY) <= 0.) {
-    throw std::invalid_argument("TrapezoidVolumeBounds: invalid y extrusion.");
-  }
-  if (get(eHalfLengthZ) <= 0.) {
-    throw std::invalid_argument("TrapezoidVolumeBounds: invalid z extrusion.");
-  }
-}
 
 }  // namespace Acts

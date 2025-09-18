@@ -1,27 +1,28 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Surfaces/PlanarBounds.hpp"
 #include "Acts/Surfaces/RectangleBounds.hpp"
-#include "Acts/Utilities/detail/periodic.hpp"
+#include "Acts/Surfaces/SurfaceBounds.hpp"
 
 #include <array>
-#include <cmath>
-#include <cstdlib>
-#include <exception>
+#include <iosfwd>
+#include <numbers>
 #include <vector>
 
 namespace Acts {
 
 /// @class EllipseBounds
+///
+/// @image html EllipseBounds.png
 ///
 /// Class to describe the bounds for a planar ellispoid
 /// surface.
@@ -40,8 +41,6 @@ class EllipseBounds : public PlanarBounds {
     eSize = 6
   };
 
-  EllipseBounds() = delete;
-
   /// Constructor for full of an ellipsoid ring
   ///
   /// @param innerRx The inner ellipse radius in x
@@ -50,8 +49,9 @@ class EllipseBounds : public PlanarBounds {
   /// @param outerRy The outer ellipse radius in y
   /// @param halfPhi spanning phi sector (is set to pi as default)
   /// @param averagePhi average phi (is set to 0. as default)
-  EllipseBounds(double innerRx, double innerRy, double outerRx, double outerRy,
-                double halfPhi = M_PI, double averagePhi = 0.) noexcept(false)
+  explicit EllipseBounds(double innerRx, double innerRy, double outerRx,
+                         double outerRy, double halfPhi = std::numbers::pi,
+                         double averagePhi = 0.) noexcept(false)
       : m_values({innerRx, innerRy, outerRx, outerRy, halfPhi, averagePhi}),
         m_boundingBox(m_values[eInnerRy], m_values[eOuterRy]) {
     checkConsistency();
@@ -60,40 +60,41 @@ class EllipseBounds : public PlanarBounds {
   /// Constructor - from fixed size array
   ///
   /// @param values The parameter values
-  EllipseBounds(const std::array<double, eSize>& values) noexcept(false)
+  explicit EllipseBounds(const std::array<double, eSize>& values) noexcept(
+      false)
       : m_values(values), m_boundingBox(values[eInnerRy], values[eOuterRy]) {
     checkConsistency();
   }
 
-  ~EllipseBounds() override = default;
-
-  BoundsType type() const final;
+  /// @copydoc SurfaceBounds::type
+  BoundsType type() const final { return eEllipse; }
 
   /// Return the bound values as dynamically sized vector
   ///
   /// @return this returns a copy of the internal values
   std::vector<double> values() const final;
 
-  /// This method checks if the point given in the local coordinates is between
-  /// two ellipsoids if only tol0 is given and additional in the phi sector is
-  /// tol1 is given
-  ///
-  /// @param lposition Local position (assumed to be in right surface frame)
-  /// @param bcheck boundary check directive
-  /// @return boolean indicator for the success of this operation
-  bool inside(const Vector2& lposition,
-              const BoundaryCheck& bcheck) const final;
+  /// @copydoc SurfaceBounds::inside
+  bool inside(const Vector2& lposition) const final;
+
+  /// @copydoc SurfaceBounds::closestPoint
+  Vector2 closestPoint(const Vector2& lposition,
+                       const SquareMatrix2& metric) const final;
+
+  using SurfaceBounds::inside;
+
+  /// @copydoc SurfaceBounds::center
+  Vector2 center() const final;
 
   /// Return the vertices
   ///
-  /// @param lseg the number of segments used to approximate
-  /// and eventually curved line, here it refers to the full 2PI Ellipse
-  ///
-  /// @note the number of segements to may be altered by also providing
-  /// the extremas in all direction
+  /// @param quarterSegments is the number of segments to approximate a quarter
+  /// of a circle. In order to symmetrize fully closed and sectoral cylinders,
+  /// also in the first case the two end points are given (albeit they overlap)
+  /// in -pi / pi
   ///
   /// @return vector for vertices in 2D
-  std::vector<Vector2> vertices(unsigned int lseg) const final;
+  std::vector<Vector2> vertices(unsigned int quarterSegments) const final;
 
   // Bounding box representation
   const RectangleBounds& boundingBox() const final;
@@ -113,28 +114,5 @@ class EllipseBounds : public PlanarBounds {
   /// if consistency is not given
   void checkConsistency() noexcept(false);
 };
-
-inline std::vector<double> EllipseBounds::values() const {
-  std::vector<double> valvector;
-  valvector.insert(valvector.begin(), m_values.begin(), m_values.end());
-  return valvector;
-}
-
-inline void EllipseBounds::checkConsistency() noexcept(false) {
-  if (get(eInnerRx) >= get(eOuterRx) or get(eInnerRx) < 0. or
-      get(eOuterRx) <= 0.) {
-    throw std::invalid_argument("EllipseBounds: invalid along x axis");
-  }
-  if (get(eInnerRy) >= get(eOuterRy) or get(eInnerRy) < 0. or
-      get(eOuterRy) <= 0.) {
-    throw std::invalid_argument("EllipseBounds: invalid along y axis.");
-  }
-  if (get(eHalfPhiSector) < 0. or get(eHalfPhiSector) > M_PI) {
-    throw std::invalid_argument("EllipseBounds: invalid phi sector setup.");
-  }
-  if (get(eAveragePhi) != detail::radian_sym(get(eAveragePhi))) {
-    throw std::invalid_argument("EllipseBounds: invalid phi positioning.");
-  }
-}
 
 }  // namespace Acts

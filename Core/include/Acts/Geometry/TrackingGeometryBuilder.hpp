@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -41,7 +41,7 @@ class TrackingGeometryBuilder : public ITrackingGeometryBuilder {
     /// The list of tracking volume builders
     std::vector<std::function<std::shared_ptr<TrackingVolume>(
         const GeometryContext& gctx, const TrackingVolumePtr&,
-        const VolumeBoundsPtr&)>>
+        const std::shared_ptr<const VolumeBounds>&)>>
         trackingVolumeBuilders;
 
     /// The tracking volume helper for detector construction
@@ -50,19 +50,19 @@ class TrackingGeometryBuilder : public ITrackingGeometryBuilder {
     /// The optional material decorator for this
     std::shared_ptr<const IMaterialDecorator> materialDecorator = nullptr;
 
-    /// Optional geometry identfier hook to be used during closure
-    /// @note Will be @b copied when calling the geometry building
-    GeometryIdentifierHook geometryIdentifierHook;
+    /// Optional geometry identifier hook to be used during closure
+    std::shared_ptr<const GeometryIdentifierHook> geometryIdentifierHook =
+        std::make_shared<GeometryIdentifierHook>();
   };
 
   /// Constructor
   ///
   /// @param [in] cgbConfig is the configuration struct for this builder
   /// @param [in] logger logging instance
-  TrackingGeometryBuilder(const Config& cgbConfig,
-                          std::unique_ptr<const Logger> logger =
-                              getDefaultLogger("TrackingGeometryBuilder",
-                                               Logging::INFO));
+  explicit TrackingGeometryBuilder(
+      const Config& cgbConfig,
+      std::unique_ptr<const Logger> logger =
+          getDefaultLogger("TrackingGeometryBuilder", Logging::INFO));
 
   /// Destructor
   ~TrackingGeometryBuilder() override = default;
@@ -82,7 +82,7 @@ class TrackingGeometryBuilder : public ITrackingGeometryBuilder {
 
   /// Get configuration method
   /// @return the current configuration
-  Config getConfiguration() const;
+  const Config& getConfiguration() const;
 
   /// set logging instance
   /// @param newLogger the new logging instance
@@ -98,10 +98,5 @@ class TrackingGeometryBuilder : public ITrackingGeometryBuilder {
   /// the logging instance
   std::unique_ptr<const Logger> m_logger;
 };
-
-inline TrackingGeometryBuilder::Config
-TrackingGeometryBuilder::getConfiguration() const {
-  return m_cfg;
-}
 
 }  // namespace Acts

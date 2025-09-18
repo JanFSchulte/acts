@@ -1,25 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Definitions/Tolerance.hpp"
 #include "Acts/Surfaces/SurfaceBounds.hpp"
-#include "Acts/Utilities/detail/periodic.hpp"
 
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <numbers>
 #include <vector>
 
 namespace Acts {
 
 /// @class CylinderBounds
+/// @image html CylinderBounds.gif
 ///
 /// Bounds for a cylindrical Surface.
 ///
@@ -34,7 +36,7 @@ namespace Acts {
 ///
 /// CylinderBounds also supports beveled sides defined by an angle.
 /// Different angles can be defined on both sides of the cylinder.
-/// A postive angle is defined as "extruding" from the defined Zlength,
+/// A positive angle is defined as "extruding" from the defined Zlength,
 /// while a negative angle is "intruding" on the Zlength.
 /// +    -            -   +
 /// ________________________
@@ -42,6 +44,7 @@ namespace Acts {
 ///  \ | /            \ | /
 ///   \|/______________\|/
 ///     2 * ZhalfLength
+///
 class CylinderBounds : public SurfaceBounds {
  public:
   enum BoundValues : int {
@@ -54,8 +57,6 @@ class CylinderBounds : public SurfaceBounds {
     eSize = 6
   };
 
-  CylinderBounds() = delete;
-
   /// Constructor - full cylinder
   ///
   /// @param r The radius of the cylinder
@@ -64,63 +65,78 @@ class CylinderBounds : public SurfaceBounds {
   /// @param avgPhi (optional) The phi value from which the opening angle spans
   /// @param bevelMinZ (optional) The bevel on the negative z side
   /// @param bevelMaxZ (optional) The bevel on the positive z sid The bevel on the positive z side
-  CylinderBounds(double r, double halfZ, double halfPhi = M_PI,
+  CylinderBounds(double r, double halfZ, double halfPhi = std::numbers::pi,
                  double avgPhi = 0., double bevelMinZ = 0.,
                  double bevelMaxZ = 0.) noexcept(false)
       : m_values({r, halfZ, halfPhi, avgPhi, bevelMinZ, bevelMaxZ}),
-        m_closed(std::abs(halfPhi - M_PI) < s_epsilon) {
+        m_closed(std::abs(halfPhi - std::numbers::pi) < s_epsilon) {
     checkConsistency();
   }
 
-  /// Constructor - from fixed size array
-  ///
-  /// @param values The parameter values
-  CylinderBounds(const std::array<double, eSize>& values) noexcept(false)
+  /// Constructor from array
+  /// @param values The bound values stored in an array
+  explicit CylinderBounds(const std::array<double, eSize>& values) noexcept(
+      false)
       : m_values(values),
-        m_closed(std::abs(values[eHalfPhiSector] - M_PI) < s_epsilon) {
+        m_closed(std::abs(values[eHalfPhiSector] - std::numbers::pi) <
+                 s_epsilon) {
     checkConsistency();
   }
 
-  ~CylinderBounds() override = default;
+  /// @copydoc SurfaceBounds::type
+  BoundsType type() const final { return eCylinder; }
 
-  BoundsType type() const final;
+  /// @copydoc SurfaceBounds::isCartesian
+  bool isCartesian() const final { return true; }
+
+  /// @copydoc SurfaceBounds::boundToCartesianJacobian
+  SquareMatrix2 boundToCartesianJacobian(const Vector2& lposition) const final {
+    static_cast<void>(lposition);
+    return SquareMatrix2::Identity();
+  }
+
+  /// @copydoc SurfaceBounds::boundToCartesianMetric
+  SquareMatrix2 boundToCartesianMetric(const Vector2& lposition) const final {
+    static_cast<void>(lposition);
+    return SquareMatrix2::Identity();
+  }
 
   /// Return the bound values as dynamically sized vector
-  ///
   /// @return this returns a copy of the internal values
   std::vector<double> values() const final;
 
-  /// Inside check for the bounds object driven by the boundary check directive
-  /// Each Bounds has a method inside, which checks if a LocalPosition is inside
-  /// the bounds  Inside can be called without/with tolerances.
-  ///
-  /// @param lposition Local position (assumed to be in right surface frame)
-  /// @param bcheck boundary check directive
-  /// @return boolean indicator for the success of this operation
-  bool inside(const Vector2& lposition,
-              const BoundaryCheck& bcheck) const final;
+  /// @copydoc SurfaceBounds::inside
+  bool inside(const Vector2& lposition) const final;
 
-  /// Specialized method for CylinderBounds that checks if a global position
-  /// is within the cylinder cover
-  ///
-  /// @param position is the position in the cylinder frame
-  /// @param bcheck is the boundary check directive
-  /// @return boolean indicator for operation success
-  bool inside3D(const Vector3& position,
-                const BoundaryCheck& bcheck = true) const;
+  /// @copydoc SurfaceBounds::closestPoint
+  Vector2 closestPoint(const Vector2& lposition,
+                       const SquareMatrix2& metric) const final;
+
+  using SurfaceBounds::inside;
 
   /// Access to the bound values
   /// @param bValue the class nested enum for the array access
   double get(BoundValues bValue) const { return m_values[bValue]; }
 
   /// Returns true for full phi coverage
-  bool coversFullAzimuth() const;
+  bool coversFullAzimuth() const { return m_closed; }
 
-  /// Create the bows/circles on either side of the cylinder
+  /// Create the bow/circle vertices on either side of the cylinder
   ///
-  /// @param trans is the global transform
-  /// @param lseg  are the numbero if phi segments
-  std::vector<Vector3> createCircles(const Transform3 trans, size_t lseg) const;
+  /// @param transform is the global transform
+  /// @param quarterSegments is the number of segments to approximate a quarter
+  /// of a circle. In order to symmetrize fully closed and sectoral cylinders,
+  /// also in the first case the two end points are given (albeit they overlap)
+  /// in -pi / pi
+  ///
+  /// @return a singlevector containing the vertices from one side and then
+  /// from the other side consecutively
+  std::vector<Vector3> circleVertices(const Transform3 transform,
+                                      unsigned int quarterSegments) const;
+
+  /// @copydoc SurfaceBounds::center
+  /// @note For CylinderBounds: returns (averagePhi, 0) in local (rphi, z) coordinates
+  Vector2 center() const final;
 
   /// Output Method for std::ostream
   std::ostream& toStream(std::ostream& sl) const final;
@@ -138,40 +154,6 @@ class CylinderBounds : public SurfaceBounds {
   /// Helper method to shift into the phi-frame
   /// @param lposition the polar coordinates in the global frame
   Vector2 shifted(const Vector2& lposition) const;
-
-  /// Return the jacobian into the polar coordinate
-  ActsMatrix<2, 2> jacobian() const;
 };
-
-inline std::vector<double> CylinderBounds::values() const {
-  std::vector<double> valvector;
-  valvector.insert(valvector.begin(), m_values.begin(), m_values.end());
-  return valvector;
-}
-
-inline bool CylinderBounds::coversFullAzimuth() const {
-  return m_closed;
-}
-
-inline void CylinderBounds::checkConsistency() noexcept(false) {
-  if (get(eR) <= 0.) {
-    throw std::invalid_argument("CylinderBounds: invalid radial setup.");
-  }
-  if (get(eHalfLengthZ) <= 0.) {
-    throw std::invalid_argument("CylinderBounds: invalid length setup.");
-  }
-  if (get(eHalfPhiSector) <= 0. or get(eHalfPhiSector) > M_PI) {
-    throw std::invalid_argument("CylinderBounds: invalid phi sector setup.");
-  }
-  if (get(eAveragePhi) != detail::radian_sym(get(eAveragePhi))) {
-    throw std::invalid_argument("CylinderBounds: invalid phi positioning.");
-  }
-  if (get(eBevelMinZ) != detail::radian_sym(get(eBevelMinZ))) {
-    throw std::invalid_argument("CylinderBounds: invalid bevel at min Z.");
-  }
-  if (get(eBevelMaxZ) != detail::radian_sym(get(eBevelMaxZ))) {
-    throw std::invalid_argument("CylinderBounds: invalid bevel at max Z.");
-  }
-}
 
 }  // namespace Acts

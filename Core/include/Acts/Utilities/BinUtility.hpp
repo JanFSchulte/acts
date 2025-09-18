@@ -1,21 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Utilities/AxisDefinitions.hpp"
 #include "Acts/Utilities/BinningData.hpp"
 #include "Acts/Utilities/BinningType.hpp"
+#include "Acts/Utilities/Enumerate.hpp"
+#include "Acts/Utilities/ProtoAxis.hpp"
 
 #include <array>
 #include <cstddef>
 #include <iostream>
+#include <iterator>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace Acts {
@@ -43,7 +49,7 @@ class BinUtility {
   /// Constructor with only a Transform3
   ///
   /// @param tForm is the local to global transform
-  BinUtility(const Transform3& tForm)
+  explicit BinUtility(const Transform3& tForm)
       : m_binningData(), m_transform(tForm), m_itransform(tForm.inverse()) {
     m_binningData.reserve(3);
   }
@@ -52,11 +58,11 @@ class BinUtility {
   ///
   /// @param bData is the provided binning data
   /// @param tForm is the (optional) transform
-  BinUtility(const BinningData& bData,
-             const Transform3& tForm = Transform3::Identity())
+  explicit BinUtility(const BinningData& bData,
+                      const Transform3& tForm = Transform3::Identity())
       : m_binningData(), m_transform(tForm), m_itransform(tForm.inverse()) {
     m_binningData.reserve(3);
-    m_binningData.push_back(bData);
+    m_binningData.emplace_back(bData);
   }
 
   /// Constructor for equidistant
@@ -65,28 +71,28 @@ class BinUtility {
   /// @param min in the minimal value
   /// @param max is the maximal value
   /// @param opt is the binning option : open, closed
-  /// @param value is the binninb value : binX, binY, binZ, etc.
+  /// @param value is the axis direction : AxisX, AxisY, AxisZ, etc.
   /// @param tForm is the (optional) transform
-  BinUtility(size_t bins, float min, float max, BinningOption opt = open,
-             BinningValue value = binX,
+  BinUtility(std::size_t bins, float min, float max, BinningOption opt = open,
+             AxisDirection value = AxisDirection::AxisX,
              const Transform3& tForm = Transform3::Identity())
       : m_binningData(), m_transform(tForm), m_itransform(tForm.inverse()) {
     m_binningData.reserve(3);
-    m_binningData.push_back(BinningData(opt, value, bins, min, max));
+    m_binningData.emplace_back(opt, value, bins, min, max);
   }
 
   /// Constructor for arbitrary
   ///
   /// @param bValues is the boundary values of the binning
   /// @param opt is the binning option : open, closed
-  /// @param value is the binninb value : binX, binY, binZ, etc.
+  /// @param value is the axis direction : AxisX, AxisY, AxisZ, etc.
   /// @param tForm is the (optional) transform
-  BinUtility(std::vector<float>& bValues, BinningOption opt = open,
-             BinningValue value = binPhi,
-             const Transform3& tForm = Transform3::Identity())
+  explicit BinUtility(std::vector<float>& bValues, BinningOption opt = open,
+                      AxisDirection value = AxisDirection::AxisPhi,
+                      const Transform3& tForm = Transform3::Identity())
       : m_binningData(), m_transform(tForm), m_itransform(tForm.inverse()) {
     m_binningData.reserve(3);
-    m_binningData.push_back(BinningData(opt, value, bValues));
+    m_binningData.emplace_back(opt, value, bValues);
   }
 
   /// Copy constructor
@@ -95,6 +101,30 @@ class BinUtility {
   BinUtility(const BinUtility& sbu) = default;
 
   BinUtility(BinUtility&& sbu) = default;
+
+  /// Create from a DirectedProtoAxis
+  ///
+  /// @param dpAxis the DirectedProtoAxis to be used
+  explicit BinUtility(const DirectedProtoAxis& dpAxis)
+      : m_binningData(),
+        m_transform(Transform3::Identity()),
+        m_itransform(Transform3::Identity()) {
+    m_binningData.reserve(3);
+    m_binningData.emplace_back(dpAxis);
+  }
+
+  /// Create from several DirectedProtoAxis objects
+  ///
+  /// @param dpAxes the DirectedProtoAxis to be used with axis directions
+  explicit BinUtility(const std::vector<DirectedProtoAxis>& dpAxes)
+      : m_binningData(),
+        m_transform(Transform3::Identity()),
+        m_itransform(Transform3::Identity()) {
+    m_binningData.reserve(3);
+    for (const auto& dpAxis : dpAxes) {
+      m_binningData.emplace_back(dpAxis);
+    }
+  }
 
   /// Assignment operator
   ///
@@ -119,7 +149,7 @@ class BinUtility {
     m_transform = m_transform * gbu.transform();
     m_itransform = m_transform.inverse();
     if (m_binningData.size() + bData.size() > 3) {
-      throw "BinUtility does not support dim > 3";
+      throw std::runtime_error{"BinUtility does not support dim > 3"};
     }
     m_binningData.insert(m_binningData.end(), bData.begin(), bData.end());
     return (*this);
@@ -130,7 +160,7 @@ class BinUtility {
 
   /// Equality operator
   bool operator==(const BinUtility& other) const {
-    return (m_transform.isApprox(other.m_transform) and
+    return (m_transform.isApprox(other.m_transform) &&
             m_binningData == other.binningData());
   }
 
@@ -138,7 +168,7 @@ class BinUtility {
   const std::vector<BinningData>& binningData() const { return m_binningData; }
 
   /// Return the total number of bins
-  size_t bins() const { return bins(0) * bins(1) * bins(2); }
+  std::size_t bins() const { return bins(0) * bins(1) * bins(2); }
 
   /// Bin-triple fast access
   ///
@@ -147,15 +177,15 @@ class BinUtility {
   /// @param position is the 3D position to be evaluated
   ///
   /// @return is the bin value in 3D
-  std::array<size_t, 3> binTriple(const Vector3& position) const {
+  std::array<std::size_t, 3> binTriple(const Vector3& position) const {
     /// transform or not
     const Vector3 bPosition = m_itransform * position;
     // get the dimension
-    size_t mdim = m_binningData.size();
+    std::size_t mdim = m_binningData.size();
     /// now get the bins
-    size_t bin0 = m_binningData[0].searchGlobal(bPosition);
-    size_t bin1 = mdim > 1 ? m_binningData[1].searchGlobal(bPosition) : 0;
-    size_t bin2 = mdim > 2 ? m_binningData[2].searchGlobal(bPosition) : 0;
+    std::size_t bin0 = m_binningData[0].searchGlobal(bPosition);
+    std::size_t bin1 = mdim > 1 ? m_binningData[1].searchGlobal(bPosition) : 0;
+    std::size_t bin2 = mdim > 2 ? m_binningData[2].searchGlobal(bPosition) : 0;
     /// return the triple
     return {{bin0, bin1, bin2}};
   }
@@ -166,15 +196,15 @@ class BinUtility {
   /// @param ba is the bin dimension
   ///
   /// @return is the bin value
-  size_t bin(const Vector3& position, size_t ba = 0) const {
+  std::size_t bin(const Vector3& position, std::size_t ba = 0) const {
     if (ba >= m_binningData.size()) {
       return 0;
     }
-    size_t bEval = m_binningData[ba].searchGlobal(m_itransform * position);
+    std::size_t bEval = m_binningData[ba].searchGlobal(m_itransform * position);
     return bEval;
   }
 
-  /// Return the oder direction for fast interlinking
+  /// Return the other direction for fast interlinking
   ///
   /// @param position is the global position for the next search
   /// @param direction is the global position for the next search
@@ -184,7 +214,7 @@ class BinUtility {
   ///
   /// @return the next bin
   int nextDirection(const Vector3& position, const Vector3& direction,
-                    size_t ba = 0) const {
+                    std::size_t ba = 0) const {
     if (ba >= m_binningData.size()) {
       return 0;
     }
@@ -202,7 +232,7 @@ class BinUtility {
   /// @param ba is the bin dimension
   ///
   /// @return bin calculated from local
-  size_t bin(const Vector2& lposition, size_t ba = 0) const {
+  std::size_t bin(const Vector2& lposition, std::size_t ba = 0) const {
     if (ba >= m_binningData.size()) {
       return 0;
     }
@@ -225,31 +255,16 @@ class BinUtility {
     return true;
   }
 
-  /// Check if bin is inside from Vector2 - no optional transform applied
-  ///
-  /// @param lposition is the local position to be evaluated
-  /// @return is a boolean check
-  bool inside(const Vector2& lposition) const {
-    return true;
-    std::vector<BinningData>::const_iterator bdIter = m_binningData.begin();
-    for (; bdIter != m_binningData.end(); ++bdIter) {
-      if (!(*bdIter).inside(lposition)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   /// First bin maximal value
-  /// @return the dimenstion of the binning data
-  size_t dimensions() const { return m_binningData.size(); }
+  /// @return the dimension of the binning data
+  std::size_t dimensions() const { return m_binningData.size(); }
 
   /// First bin maximal value
   ///
   /// @param ba is the binaccessor
   ///
-  /// @return size_t is the maximal bin of the accessor entry
-  size_t max(size_t ba = 0) const {
+  /// @return std::size_t is the maximal bin of the accessor entry
+  std::size_t max(std::size_t ba = 0) const {
     if (ba >= m_binningData.size()) {
       return 0;
     }
@@ -260,8 +275,8 @@ class BinUtility {
   ///
   /// @param ba is the binaccessor
   ///
-  /// @return size_t is the bins of the accessor entry
-  size_t bins(size_t ba) const {
+  /// @return std::size_t is the bins of the accessor entry
+  std::size_t bins(std::size_t ba) const {
     if (ba >= m_binningData.size()) {
       return 1;
     }
@@ -278,19 +293,19 @@ class BinUtility {
   /// @param ba is the binaccessor
   ///
   /// @return the binning value of the accessor entry
-  BinningValue binningValue(size_t ba = 0) const {
+  AxisDirection binningValue(std::size_t ba = 0) const {
     if (ba >= m_binningData.size()) {
-      throw "dimension out of bounds";
+      throw std::runtime_error{"Dimension out of bounds"};
     }
     return (m_binningData[ba].binvalue);
   }
 
   /// Serialize the bin triple
-  /// - this creates a simple size_t from a triple object
+  /// - this creates a simple std::size_t from a triple object
   ///
   /// @param bin is the bin to be serialized
-  size_t serialize(const std::array<size_t, 3>& bin) const {
-    size_t serializedBin = bin[0];
+  std::size_t serialize(const std::array<std::size_t, 3>& bin) const {
+    std::size_t serializedBin = bin[0];
     if (m_binningData.size() == 2) {
       serializedBin += bin[1] * m_binningData[0].bins();
     } else if (m_binningData.size() == 3) {
@@ -303,29 +318,34 @@ class BinUtility {
   /// Output Method for std::ostream, to be overloaded by child classes
   ///
   /// @param sl is the ostream to be dumped into
-  std::ostream& toStream(std::ostream& sl) const {
-    sl << "BinUtility for " << m_binningData.size()
+  /// @param indent the current indentation
+  ///
+  /// @return the input stream
+  std::ostream& toStream(std::ostream& sl,
+                         const std::string& indent = "") const {
+    sl << indent << "BinUtility for " << m_binningData.size()
        << "- dimensional array:" << std::endl;
-    std::vector<BinningData>::const_iterator bdIter = m_binningData.begin();
-    for (size_t ibd = 0; bdIter != m_binningData.end(); ++bdIter, ++ibd) {
-      sl << "dimension     : " << ibd << std::endl;
-      sl << " - type       : " << size_t((*bdIter).type) << std::endl;
-      sl << " - option     : " << size_t((*bdIter).option) << std::endl;
-      sl << " - value      : " << size_t((*bdIter).binvalue) << std::endl;
-      sl << " - bins       : " << (*bdIter).bins() << std::endl;
-      sl << " - min/max    : " << (*bdIter).min << " / " << (*bdIter).max
-         << std::endl;
-      if ((*bdIter).type == equidistant) {
-        sl << " - step       : " << (*bdIter).step << std::endl;
-      }
-      sl << " - boundaries : | ";
-      std::vector<float>::const_iterator bIter = (*bdIter).boundaries().begin();
-      for (; bIter != (*bdIter).boundaries().end(); ++bIter) {
-        sl << (*bIter) << " | ";
-      }
-      sl << std::endl;
+    for (auto [ibd, bd] : enumerate(m_binningData)) {
+      sl << indent << "dimension     : " << ibd << std::endl;
+      sl << bd.toString(indent) << std::endl;
     }
     return sl;
+  }
+
+  /// Output into a string
+  ///
+  /// @param indent the current indentation
+  ///
+  /// @return a string with the stream information
+  std::string toString(const std::string& indent = "") const {
+    std::stringstream ss;
+    toStream(ss, indent);
+    return ss.str();
+  }
+
+  /// Overload of << operator for std::ostream for debug output
+  friend std::ostream& operator<<(std::ostream& sl, const BinUtility& bgen) {
+    return bgen.toStream(sl);
   }
 
  private:
@@ -333,8 +353,5 @@ class BinUtility {
   Transform3 m_transform;                  /// shared transform
   Transform3 m_itransform;                 /// unique inverse transform
 };
-
-/// Overload of << operator for std::ostream for debug output
-std::ostream& operator<<(std::ostream& sl, const BinUtility& bgen);
 
 }  // namespace Acts

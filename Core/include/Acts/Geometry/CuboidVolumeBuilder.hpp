@@ -1,20 +1,21 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/ITrackingVolumeBuilder.hpp"
-#include "Acts/Utilities/BinningType.hpp"
+#include "Acts/Utilities/AxisDefinitions.hpp"
 
+#include <array>
+#include <cstddef>
 #include <functional>
-#include <iosfwd>
 #include <memory>
 #include <optional>
 #include <string>
@@ -68,12 +69,19 @@ class CuboidVolumeBuilder : public ITrackingVolumeBuilder {
     // Boolean flag if layer is active
     bool active = false;
     // Bins in Y direction
-    size_t binsY = 1;
+    std::size_t binsY = 1;
     // Bins in Z direction
-    size_t binsZ = 1;
-    // Envelope in X (along layer normal)
-    std::pair<double, double> envelopeX{0, 0};
+    std::size_t binsZ = 1;
+    // Envelope in X
+    std::array<double, 2u> envelopeX{0, 0};
+    // Envelope in Y
+    std::array<double, 2u> envelopeY{0, 0};
+    // Envelope in Z
+    std::array<double, 2u> envelopeZ{0, 0};
+    // An optional rotation for this
     std::optional<RotationMatrix3> rotation{std::nullopt};
+    // Dimension for the binning
+    AxisDirection binningDimension = AxisDirection::AxisX;
   };
 
   /// @brief This struct stores the data for the construction of a cuboid
@@ -95,6 +103,8 @@ class CuboidVolumeBuilder : public ITrackingVolumeBuilder {
     std::string name = "Volume";
     // Material
     std::shared_ptr<const IVolumeMaterial> volumeMaterial = nullptr;
+    // Dimension for the binning
+    AxisDirection binningDimension = AxisDirection::AxisX;
   };
 
   /// @brief This struct stores the configuration of the tracking geometry
@@ -113,7 +123,7 @@ class CuboidVolumeBuilder : public ITrackingVolumeBuilder {
   /// @brief Constructor that sets the config
   ///
   /// @param [in] cfg Configuration of the detector
-  CuboidVolumeBuilder(Config& cfg) : m_cfg(cfg) {}
+  explicit CuboidVolumeBuilder(Config& cfg) : m_cfg(cfg) {}
 
   /// @brief Setter of the config
   ///
@@ -130,7 +140,7 @@ class CuboidVolumeBuilder : public ITrackingVolumeBuilder {
   std::shared_ptr<const Surface> buildSurface(const GeometryContext& gctx,
                                               const SurfaceConfig& cfg) const;
 
-  /// @brief This function creates a layer with a surface encaspulated with a
+  /// @brief This function creates a layer with a surface encapsulated with a
   /// given configuration. The surface gets a detector element attached if the
   /// template parameter is non-void.
   ///
@@ -165,7 +175,7 @@ class CuboidVolumeBuilder : public ITrackingVolumeBuilder {
                                          const VolumeConfig& cfg) const;
 
   void sortVolumes(std::vector<std::pair<TrackingVolumePtr, Vector3>>& tapVec,
-                   BinningValue bValue) const;
+                   AxisDirection bValue) const;
 
   /// @brief This function builds a world TrackingVolume based on a given
   /// configuration
@@ -175,8 +185,8 @@ class CuboidVolumeBuilder : public ITrackingVolumeBuilder {
   /// @return Pointer to the created TrackingGeometry
   std::shared_ptr<TrackingVolume> trackingVolume(
       const GeometryContext& gctx,
-      std::shared_ptr<const TrackingVolume> /*unused*/,
-      std::shared_ptr<const VolumeBounds> /*unused*/) const override;
+      std::shared_ptr<const TrackingVolume> /*oppositeVolume*/,
+      std::shared_ptr<const VolumeBounds> /*outsideBounds*/) const override;
 
  private:
   /// Configuration of the world volume

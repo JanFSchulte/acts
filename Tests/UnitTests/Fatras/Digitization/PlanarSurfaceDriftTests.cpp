@@ -1,22 +1,24 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#include <boost/test/data/test_case.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Algebra.hpp"
+#include "Acts/Definitions/Tolerance.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
+#include "Acts/Surfaces/CurvilinearSurface.hpp"
 #include "Acts/Surfaces/PlaneSurface.hpp"
+#include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
-#include "ActsFatras/Digitization/DigitizationError.hpp"
 #include "ActsFatras/Digitization/PlanarSurfaceDrift.hpp"
 
-namespace bdata = boost::unit_test::data;
+#include <array>
+#include <memory>
 
 namespace ActsFatras {
 
@@ -30,8 +32,8 @@ BOOST_AUTO_TEST_CASE(PlanarSurfaceDrift) {
   Acts::Vector3 cPosition = Acts::Vector3(10., 50., 12.);
   Acts::Vector3 cNormal = Acts::Vector3(1., 1., 1.).normalized();
 
-  auto planeSurface =
-      Acts::Surface::makeShared<Acts::PlaneSurface>(cPosition, cNormal);
+  std::shared_ptr<Acts::PlaneSurface> planeSurface =
+      Acts::CurvilinearSurface(cPosition, cNormal).planeSurface();
 
   double depletion = 0.250;
 
@@ -69,7 +71,7 @@ BOOST_AUTO_TEST_CASE(PlanarSurfaceDrift) {
   //
   // -> local segment must not be symmetric around (0,0)
   // -> segment exit at pos local z remains unchanged
-  // -> segment entry at neg local z changes in x, remains unchaged in y
+  // -> segment entry at neg local z changes in x, remains unchanged in y
   auto driftedSegment = psd.toReadout(geoCtx, *planeSurface, depletion,
                                       cPosition, particleDir, holeDrift);
 
@@ -91,7 +93,7 @@ BOOST_AUTO_TEST_CASE(PlanarSurfaceDrift) {
   //
   // -> local segment must not be symmetric around (0,0)
   // -> segment entry at neg local z remains unchanged
-  // -> segment exit at pos local z changes in x, remains unchaged in y
+  // -> segment exit at pos local z changes in x, remains unchanged in y
   driftedSegment = psd.toReadout(geoCtx, *planeSurface, depletion, cPosition,
                                  particleDir, chargeDrift);
 

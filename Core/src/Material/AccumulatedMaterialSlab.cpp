@@ -1,13 +1,14 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Material/AccumulatedMaterialSlab.hpp"
 
+#include "Acts/Material/Material.hpp"
 #include "Acts/Material/detail/AverageMaterials.hpp"
 
 void Acts::AccumulatedMaterialSlab::accumulate(MaterialSlab slab,
@@ -21,7 +22,7 @@ void Acts::AccumulatedMaterialSlab::accumulate(MaterialSlab slab,
 void Acts::AccumulatedMaterialSlab::trackVariance(MaterialSlab slabReference,
                                                   bool useEmptyTrack) {
   // Only use real tracks or if empty tracks are allowed.
-  if (useEmptyTrack or (0 < m_trackAverage.thickness())) {
+  if (useEmptyTrack || (0 < m_trackAverage.thickness())) {
     float variance = ((1 / m_trackAverage.material().X0()) -
                       (1 / slabReference.material().X0())) *
                      ((1 / m_trackAverage.material().X0()) -
@@ -38,7 +39,7 @@ void Acts::AccumulatedMaterialSlab::trackVariance(MaterialSlab slabReference,
 
 void Acts::AccumulatedMaterialSlab::trackAverage(bool useEmptyTrack) {
   // average only real tracks or if empty tracks are allowed.
-  if (useEmptyTrack or (0 < m_trackAverage.thickness())) {
+  if (useEmptyTrack || (0 < m_trackAverage.thickness())) {
     if (m_totalCount == 0u) {
       m_totalAverage = m_trackAverage;
     } else {

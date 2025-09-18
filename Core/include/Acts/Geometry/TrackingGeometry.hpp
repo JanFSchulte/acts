@@ -1,21 +1,25 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/GeometryIdentifier.hpp"
+#include "Acts/Geometry/TrackingGeometryVisitor.hpp"
 #include "Acts/Geometry/TrackingVolume.hpp"
+#include "Acts/Geometry/TrackingVolumeVisitorConcept.hpp"
+#include "Acts/Surfaces/SurfaceVisitorConcept.hpp"
+#include "Acts/Utilities/Logger.hpp"
 
 #include <memory>
-#include <string>
 #include <unordered_map>
+#include <utility>
 
 namespace Acts {
 
@@ -23,9 +27,12 @@ class Layer;
 class Surface;
 class PerigeeSurface;
 class IMaterialDecorator;
+class TrackingVolume;
+class TrackingGeometryVisitor;
+class TrackingGeometryMutableVisitor;
 
-using TrackingVolumePtr = std::shared_ptr<const TrackingVolume>;
-using MutableTrackingVolumePtr = std::shared_ptr<TrackingVolume>;
+// Forward declaration only, the implementation is hidden in the .cpp file.
+class Gen1GeometryClosureVisitor;
 
 ///  @class TrackingGeometry
 ///
@@ -33,7 +40,7 @@ using MutableTrackingVolumePtr = std::shared_ptr<TrackingVolume>;
 ///
 ///  It enables both, a global search for an asociatedVolume
 ///  (respectively, if existing, a global search of an associated Layer or the
-///  next associated Layer), such as a continous navigation by BoundarySurfaces
+///  next associated Layer), such as a continuous navigation by BoundarySurfaces
 ///  between the confined TrackingVolumes.
 class TrackingGeometry {
   /// Give the GeometryBuilder friend rights
@@ -46,9 +53,13 @@ class TrackingGeometry {
   /// @param materialDecorator is a dediated decorator that can assign
   ///        surface or volume based material to the TrackingVolume
   /// @param hook Identifier hook to be applied to surfaces
-  TrackingGeometry(const MutableTrackingVolumePtr& highestVolume,
-                   const IMaterialDecorator* materialDecorator = nullptr,
-                   const GeometryIdentifierHook& hook = {});
+  /// @param logger instance of a logger (defaulting to the "silent" one)
+  /// @param close If true, run the Gen1 geometry closure
+  explicit TrackingGeometry(
+      const std::shared_ptr<TrackingVolume>& highestVolume,
+      const IMaterialDecorator* materialDecorator = nullptr,
+      const GeometryIdentifierHook& hook = {},
+      const Logger& logger = getDummyLogger(), bool close = true);
 
   /// Destructor
   ~TrackingGeometry();
@@ -56,6 +67,14 @@ class TrackingGeometry {
   /// Access to the world volume
   /// @return plain pointer to the world volume
   const TrackingVolume* highestTrackingVolume() const;
+
+  /// Access to the world volume
+  /// @return plain pointer to the world volume
+  TrackingVolume* highestTrackingVolume();
+
+  /// Access to the world volume
+  /// @return shared pointer to the world volume
+  std::shared_ptr<const TrackingVolume> highestTrackingVolumePtr() const;
 
   /// return the lowest tracking Volume
   ///
@@ -75,29 +94,86 @@ class TrackingGeometry {
   const Layer* associatedLayer(const GeometryContext& gctx,
                                const Vector3& gp) const;
 
-  /// Register the beam tube
+  /// @brief Visit all reachable surfaces
   ///
-  /// @param beam is the beam line surface
-  void registerBeamTube(std::shared_ptr<const PerigeeSurface> beam);
-
-  /// @brief surface representing the beam pipe
+  /// @tparam visitor_t Type of the callable visitor
   ///
-  /// @note The ownership is not passed, e.g. do not delete the pointer
+  /// @param visitor The callable. Will be called for each reachable surface
+  /// that is found, a selection of the surfaces can be done in the visitor
+  /// @param restrictToSensitives If true, only sensitive surfaces are visited
   ///
-  /// @return raw pointer to surface representing the beam pipe
-  ///         (could be a null pointer)
-  const Surface* getBeamline() const;
+  /// @note If a context is needed for the visit, the visitor has to provide
+  /// this, e.g. as a private member
+  template <SurfaceVisitor visitor_t>
+  void visitSurfaces(visitor_t&& visitor, bool restrictToSensitives) const {
+    highestTrackingVolume()->template visitSurfaces<visitor_t>(
+        std::forward<visitor_t>(visitor), restrictToSensitives);
+  }
 
   /// @brief Visit all sensitive surfaces
   ///
   /// @tparam visitor_t Type of the callable visitor
   ///
   /// @param visitor The callable. Will be called for each sensitive surface
-  /// that is found
-  template <typename visitor_t>
+  /// that is found, a selection of the surfaces can be done in the visitor
+  ///
+  /// @note If a context is needed for the visit, the visitor has to provide
+  /// this, e.g. as a private member
+  template <SurfaceVisitor visitor_t>
   void visitSurfaces(visitor_t&& visitor) const {
-    highestTrackingVolume()->template visitSurfaces<visitor_t>(
+    visitSurfaces(std::forward<visitor_t>(visitor), true);
+  }
+
+  /// @brief Visit all reachable tracking volumes
+  ///
+  /// @tparam visitor_t Type of the callable visitor
+  ///
+  /// @param visitor The callable. Will be called for each reachable volume
+  /// that is found, a selection of the volumes can be done in the visitor
+  ///
+  /// @note If a context is needed for the visit, the visitor has to provide
+  /// this, e.g. as a private member
+  template <TrackingVolumeVisitor visitor_t>
+  void visitVolumes(visitor_t&& visitor) const {
+    highestTrackingVolume()->template visitVolumes<visitor_t>(
         std::forward<visitor_t>(visitor));
+  }
+
+  /// @copydoc TrackingVolume::apply
+  void apply(TrackingGeometryVisitor& visitor) const;
+
+  /// @copydoc TrackingVolume::apply
+  void apply(TrackingGeometryMutableVisitor& visitor);
+
+  /// @brief Apply an arbitrary callable as a visitor to the tracking volume
+  ///
+  /// @param callable The callable to apply
+  ///
+  /// @note The visitor can be overloaded on any of the arguments that
+  ///       the methods in @c TrackingGeometryVisitor receive.
+  template <typename Callable>
+  void apply(Callable&& callable)
+    requires(detail::callableWithAnyMutable<Callable>() &&
+             !detail::callableWithAnyConst<Callable>())
+  {
+    detail::TrackingGeometryLambdaMutableVisitor visitor{
+        std::forward<Callable>(callable)};
+    apply(visitor);
+  }
+
+  /// @brief Apply an arbitrary callable as a visitor to the tracking volume
+  ///
+  /// @param callable The callable to apply
+  ///
+  /// @note The visitor can be overloaded on any of the arguments that
+  ///       the methods in @c TrackingGeometryMutableVisitor receive.
+  template <typename Callable>
+  void apply(Callable&& callable) const
+    requires(detail::callableWithAnyConst<Callable>())
+  {
+    detail::TrackingGeometryLambdaVisitor visitor{
+        std::forward<Callable>(callable)};
+    apply(visitor);
   }
 
   /// Search for a volume with the given identifier.
@@ -114,11 +190,31 @@ class TrackingGeometry {
   /// @retval pointer to the found surface otherwise.
   const Surface* findSurface(GeometryIdentifier id) const;
 
+  /// Access to the GeometryIdentifier - Surface association map
+  const std::unordered_map<GeometryIdentifier, const Surface*>&
+  geoIdSurfaceMap() const;
+
+  /// Visualize a tracking geometry including substructure
+  /// @param helper The visualization helper that implement the output
+  /// @param gctx The geometry context
+  /// @param viewConfig Global view config
+  /// @param portalViewConfig View config for portals
+  /// @param sensitiveViewConfig View configuration for sensitive surfaces
+  void visualize(IVisualization3D& helper, const GeometryContext& gctx,
+                 const ViewConfig& viewConfig = s_viewVolume,
+                 const ViewConfig& portalViewConfig = s_viewPortal,
+                 const ViewConfig& sensitiveViewConfig = s_viewSensitive) const;
+
+  /// Which *type* of geometry this represents: Gen1 or Gen3
+  enum class GeometryVersion { Gen1, Gen3 };
+
+  /// Return the *generation* of this `TrackingGeometry`
+  /// @return the generation of this `TrackingGeometry`
+  GeometryVersion geometryVersion() const;
+
  private:
   // the known world
-  TrackingVolumePtr m_world;
-  // beam line
-  std::shared_ptr<const PerigeeSurface> m_beam;
+  std::shared_ptr<TrackingVolume> m_world;
   // lookup containers
   std::unordered_map<GeometryIdentifier, const TrackingVolume*> m_volumesById;
   std::unordered_map<GeometryIdentifier, const Surface*> m_surfacesById;

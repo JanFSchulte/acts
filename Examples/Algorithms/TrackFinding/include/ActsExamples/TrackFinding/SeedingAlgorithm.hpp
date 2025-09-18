@@ -1,27 +1,41 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
-#include "Acts/Seeding/BinFinder.hpp"
+#include "Acts/EventData/SpacePointContainer.hpp"
 #include "Acts/Seeding/SeedFilterConfig.hpp"
+#include "Acts/Seeding/SeedFinder.hpp"
 #include "Acts/Seeding/SeedFinderConfig.hpp"
-#include "Acts/Seeding/SpacePointGrid.hpp"
+#include "Acts/Seeding/detail/CylindricalSpacePointGrid.hpp"
+#include "Acts/Utilities/GridBinFinder.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "ActsExamples/EventData/SimSeed.hpp"
 #include "ActsExamples/EventData/SimSpacePoint.hpp"
-#include "ActsExamples/Framework/BareAlgorithm.hpp"
+#include "ActsExamples/EventData/SpacePointContainer.hpp"
+#include "ActsExamples/Framework/DataHandle.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
+#include "ActsExamples/Framework/ProcessCode.hpp"
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
+
+namespace Acts {
+template <std::size_t>
+class GridBinFinder;
+}  // namespace Acts
 
 namespace ActsExamples {
 
 /// Construct track seeds from space points.
-class SeedingAlgorithm final : public BareAlgorithm {
+class SeedingAlgorithm final : public IAlgorithm {
  public:
   struct Config {
     /// Input space point collections.
@@ -33,23 +47,31 @@ class SeedingAlgorithm final : public BareAlgorithm {
     std::vector<std::string> inputSpacePoints;
     /// Output track seed collection.
     std::string outputSeeds;
-    /// Output proto track collection.
-    std::string outputProtoTracks;
 
     Acts::SeedFilterConfig seedFilterConfig;
-    Acts::SeedFinderConfig<SimSpacePoint> seedFinderConfig;
-    Acts::SpacePointGridConfig gridConfig;
+
+    Acts::SeedFinderConfig<typename Acts::SpacePointContainer<
+        ActsExamples::SpacePointContainer<std::vector<const SimSpacePoint*>>,
+        Acts::detail::RefHolder>::SpacePointProxyType>
+        seedFinderConfig;
+    Acts::CylindricalSpacePointGridConfig gridConfig;
+    Acts::CylindricalSpacePointGridOptions gridOptions;
+
     Acts::SeedFinderOptions seedFinderOptions;
 
     // allow for different values of rMax in gridConfig and seedFinderConfig
     bool allowSeparateRMax = false;
 
     // vector containing the map of z bins in the top and bottom layers
-    std::vector<std::pair<int, int> > zBinNeighborsTop;
-    std::vector<std::pair<int, int> > zBinNeighborsBottom;
+    std::vector<std::pair<int, int>> zBinNeighborsTop;
+    std::vector<std::pair<int, int>> zBinNeighborsBottom;
     // number of phiBin neighbors at each side of the current bin that will be
     // used to search for SPs
-    int numPhiNeighbors = 0;
+    int numPhiNeighbors = 1;
+
+    // Connect custom selections on the space points or to the doublet
+    // compatibility
+    bool useExtraCuts = false;
   };
 
   /// Construct the seeding algorithm.
@@ -68,7 +90,53 @@ class SeedingAlgorithm final : public BareAlgorithm {
   const Config& config() const { return m_cfg; }
 
  private:
+  using SpacePointProxy_t = typename Acts::SpacePointContainer<
+      ActsExamples::SpacePointContainer<std::vector<const SimSpacePoint*>>,
+      Acts::detail::RefHolder>::SpacePointProxyType;
+
+  Acts::SeedFinder<SpacePointProxy_t,
+                   Acts::CylindricalSpacePointGrid<SpacePointProxy_t>>
+      m_seedFinder;
+  std::unique_ptr<const Acts::GridBinFinder<3ul>> m_bottomBinFinder{nullptr};
+  std::unique_ptr<const Acts::GridBinFinder<3ul>> m_topBinFinder{nullptr};
+
   Config m_cfg;
+
+  std::vector<std::unique_ptr<ReadDataHandle<SimSpacePointContainer>>>
+      m_inputSpacePoints{};
+
+  WriteDataHandle<SimSeedContainer> m_outputSeeds{this, "OutputSeeds"};
+
+  static inline bool itkFastTrackingCuts(const SpacePointProxy_t& /*middle*/,
+                                         const SpacePointProxy_t& other,
+                                         float cotTheta,
+                                         bool isBottomCandidate) {
+    static float rMin = 45.;
+    static float cotThetaMax = 1.5;
+
+    if (isBottomCandidate && other.radius() < rMin &&
+        (cotTheta > cotThetaMax || cotTheta < -cotThetaMax)) {
+      return false;
+    }
+    return true;
+  }
+
+  static inline bool itkFastTrackingSPselect(const SpacePointProxy_t& sp) {
+    // At small r we remove points beyond |z| > 200.
+    float r = sp.radius();
+    float zabs = std::abs(sp.z());
+    if (zabs > 200. && r < 45.) {
+      return false;
+    }
+
+    /// Remove space points beyond eta=4 if their z is
+    /// larger than the max seed z0 (150.)
+    float cotTheta = 27.2899;  // corresponds to eta=4
+    if ((zabs - 150.) > cotTheta * r) {
+      return false;
+    }
+    return true;
+  }
 };
 
 }  // namespace ActsExamples

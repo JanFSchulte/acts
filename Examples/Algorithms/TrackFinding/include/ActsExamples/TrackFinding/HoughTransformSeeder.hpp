@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 // @file HoughTransformSeeder.hpp
 // @author Riley Xu then modified to ACTS by Jahred Adelman
@@ -72,17 +72,28 @@
 
 #include "Acts/Geometry/GeometryIdentifier.hpp"
 #include "Acts/Utilities/Delegate.hpp"
+#include "Acts/Utilities/Grid.hpp"
 #include "Acts/Utilities/Logger.hpp"
 #include "Acts/Utilities/Result.hpp"
+#include "ActsExamples/EventData/Index.hpp"
 #include "ActsExamples/EventData/Measurement.hpp"
+#include "ActsExamples/EventData/ProtoTrack.hpp"
 #include "ActsExamples/EventData/SimSpacePoint.hpp"
-#include "ActsExamples/Framework/BareAlgorithm.hpp"
-#include "ActsExamples/TrackFinding/HoughVectors.hpp"
+#include "ActsExamples/Framework/DataHandle.hpp"
+#include "ActsExamples/Framework/IAlgorithm.hpp"
+#include "ActsExamples/Framework/ProcessCode.hpp"
 
+#include <cstddef>
+#include <memory>
+#include <numbers>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+namespace ActsExamples {
+struct AlgorithmContext;
+}  // namespace ActsExamples
 
 using ResultDouble = Acts::Result<double>;
 using ResultBool = Acts::Result<bool>;
@@ -94,7 +105,8 @@ using LayerIDFinder = Acts::Delegate<ResultUnsigned(
     double)>;  // (double r) this function will map the r of a measurement to a
                // layer.
 using SliceTester = Acts::Delegate<ResultBool(
-    double, unsigned, int)>;  // (double z,unsigned layer, int slice)
+    double, unsigned, int)>;  // (double z,unsigned layer, int slice) returns
+                              // true if measurement in slice
 
 namespace Acts {
 class TrackingGeometry;
@@ -116,7 +128,10 @@ namespace ActsExamples {
 /// each bin. Size m_houghHistSize_y * m_houghHistSize_x. (NOTE y is row
 /// coordinate) For now, what is stored is actually the index of the object in
 /// the vectors, so we can get the Index layer
-using HoughHist = vector2D<std::pair<int, std::unordered_set<unsigned>>>;
+using Axis =
+    Acts::Axis<Acts::AxisType::Equidistant, Acts::AxisBoundaryType::Bound>;
+using HoughHist =
+    Acts::Grid<std::pair<int, std::unordered_set<unsigned>>, Axis, Axis>;
 
 enum HoughHitType { SP = 0, MEASUREMENT = 1 };
 
@@ -138,7 +153,7 @@ thread_local std::vector<std::shared_ptr<HoughMeasurementStruct>>
     houghMeasurementStructs;
 
 /// Construct track seeds from space points.
-class HoughTransformSeeder final : public BareAlgorithm {
+class HoughTransformSeeder final : public IAlgorithm {
  public:
   struct Config {
     /// Input space point collections.
@@ -153,8 +168,7 @@ class HoughTransformSeeder final : public BareAlgorithm {
     std::string outputSeeds;
     /// Output hough track collection.
     std::string outputProtoTracks;
-    /// Input source links collection.
-    std::string inputSourceLinks;
+    /// Tracking geometry required to access global-to-local transforms.
     std::shared_ptr<const Acts::TrackingGeometry> trackingGeometry;
     /// For which part of the detector geometry should space points be created.
     ///
@@ -172,7 +186,7 @@ class HoughTransformSeeder final : public BareAlgorithm {
     // one simple example, one may consider that hits with z < 50 mm belong to
     // one subregion, and hits with z > -50 mm belong to a second subregion.
     // Note that hits even in this toy example belong to more than one
-    // subregions. But since not all hits are considered this provides a way to
+    // subregion. But since not all hits are considered this provides a way to
     // reduce potential combinatorics
 
     std::vector<int> subRegions = {
@@ -181,10 +195,10 @@ class HoughTransformSeeder final : public BareAlgorithm {
 
     unsigned nLayers = 10;  // total number of layers
 
-    float xMin = 0;            // minphi
-    float xMax = 2 * 3.14159;  // maxphi
-    float yMin = -1.0;         // min q/pt, -1/1 GeV
-    float yMax = 1.0;          // max q/pt, +1/1 GeV
+    float xMin = 0.;                    // minphi
+    float xMax = 2 * std::numbers::pi;  // maxphi
+    float yMin = -1.;                   // min q/pt, -1/1 GeV
+    float yMax = 1.;                    // max q/pt, +1/1 GeV
 
     /// Size of the houghHists. One obvious concern with this being too big is
     /// that it will take up more memory But the bins of the houghHist are
@@ -257,6 +271,14 @@ class HoughTransformSeeder final : public BareAlgorithm {
   std::unique_ptr<const Acts::Logger> m_logger;
   const Acts::Logger& logger() const { return *m_logger; }
 
+  WriteDataHandle<ProtoTrackContainer> m_outputProtoTracks{this,
+                                                           "OutputProtoTracks"};
+  std::vector<std::unique_ptr<ReadDataHandle<SimSpacePointContainer>>>
+      m_inputSpacePoints{};
+
+  ReadDataHandle<MeasurementContainer> m_inputMeasurements{this,
+                                                           "InputMeasurements"};
+
   ////////////////////////////////////////////////////////////////////////
   /// Convenience
 
@@ -274,8 +296,9 @@ class HoughTransformSeeder final : public BareAlgorithm {
 
   ///////////////////////////////////////////////////////////////////////
   // Helpers
-  std::pair<unsigned, unsigned> yToXBins(size_t yBin_min, size_t yBin_max,
-                                         double r, double phi,
+  std::pair<unsigned, unsigned> yToXBins(std::size_t yBin_min,
+                                         std::size_t yBin_max, double r,
+                                         double phi,
                                          unsigned layer)
       const;  // given y bins, return x bins passed that need to be filled in
               // the HoughHist, including extensions
@@ -285,7 +308,7 @@ class HoughTransformSeeder final : public BareAlgorithm {
                      unsigned y) const;  // did we pass extensions?
   void drawHoughHist(HoughHist const& houghHist,
                      std::string const& name);  // for making pretty plots
-  std::vector<std::vector<int>> getComboIndices(std::vector<size_t>& sizes)
+  std::vector<std::vector<int>> getComboIndices(std::vector<std::size_t>& sizes)
       const;  // useful to find all candidates from given bins that pass
               // (looping over hit combinatorics)
 

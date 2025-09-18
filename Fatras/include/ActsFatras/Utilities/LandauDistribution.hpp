@@ -1,13 +1,14 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
+#include <limits>
 #include <random>
 
 namespace ActsFatras {
@@ -32,7 +33,7 @@ class LandauDistribution {
     /// Construct from parameters.
     param_type(double location_, double scale_)
         : location(location_), scale(scale_) {}
-    // Explicitlely defaulted construction and assignment
+    // Explicitly defaulted construction and assignment
     param_type() = default;
     param_type(const param_type &) = default;
     param_type(param_type &&) = default;
@@ -41,10 +42,7 @@ class LandauDistribution {
 
     /// Parameters should be EqualityComparable
     friend bool operator==(const param_type &lhs, const param_type &rhs) {
-      return (lhs.location == rhs.location) and (lhs.scale == rhs.scale);
-    }
-    friend bool operator!=(const param_type &lhs, const param_type &rhs) {
-      return not(lhs == rhs);
+      return (lhs.location == rhs.location) && (lhs.scale == rhs.scale);
     }
   };
   /// The type of the generated values.
@@ -53,7 +51,7 @@ class LandauDistribution {
   /// Construct directly from the distribution parameters.
   LandauDistribution(double location, double scale) : m_cfg(location, scale) {}
   /// Construct from a parameter object.
-  LandauDistribution(const param_type &cfg) : m_cfg(cfg) {}
+  explicit LandauDistribution(const param_type &cfg) : m_cfg(cfg) {}
   // Explicitlely defaulted construction and assignment
   LandauDistribution() = default;
   LandauDistribution(const LandauDistribution &) = default;
@@ -89,10 +87,6 @@ class LandauDistribution {
   friend bool operator==(const LandauDistribution &lhs,
                          const LandauDistribution &rhs) {
     return lhs.m_cfg == rhs.m_cfg;
-  }
-  friend bool operator!=(const LandauDistribution &lhs,
-                         const LandauDistribution &rhs) {
-    return !(lhs == rhs);
   }
 
  private:

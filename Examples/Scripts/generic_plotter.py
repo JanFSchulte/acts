@@ -3,13 +3,13 @@ from pathlib import Path
 from typing import Optional, Dict, List
 import re
 import enum
+import sys
 
 import uproot
 import typer
 import hist
 import pydantic
 import yaml
-import pandas
 import matplotlib.pyplot
 import awkward
 
@@ -34,6 +34,7 @@ class Extra(HistConfig):
 class Config(Model):
     histograms: Dict[str, HistConfig] = pydantic.Field(default_factory=dict)
     extra_histograms: List[Extra] = pydantic.Field(default_factory=list)
+    exclude: List[str] = pydantic.Field(default_factory=list)
 
 
 class Mode(str, enum.Enum):
@@ -45,7 +46,7 @@ def main(
     infile: Path = typer.Argument(
         ..., exists=True, dir_okay=False, help="The input ROOT file"
     ),
-    treename: str = typer.Argument(..., help="The tree to look up branched from"),
+    treename: str = typer.Argument(..., help="The tree to look up branches from"),
     outpath: Path = typer.Argument(
         "outfile", dir_okay=False, help="The output ROOT file"
     ),
@@ -71,6 +72,7 @@ def main(
     silent: bool = typer.Option(
         False, "--silent", "-s", help="Do not print any output"
     ),
+    dump_yml: bool = typer.Option(False, help="Print axis ranges as yml"),
 ):
     """
     Script to plot all branches in a TTree from a ROOT file, with optional configurable binning and ranges.
@@ -86,24 +88,39 @@ def main(
         config = Config()
     else:
         with config_file.open() as fh:
-            config = Config.parse_obj(yaml.safe_load(fh))
+            config = Config.model_validate(yaml.safe_load(fh))
 
     histograms = {}
 
     if not silent:
-        print(config.extra_histograms)
+        print(config.extra_histograms, file=sys.stderr)
 
     for df in tree.iterate(library="ak", how=dict):
         for col in df.keys():
+            if any([re.match(ex, col) for ex in config.exclude]):
+                continue
             h = histograms.get(col)
             values = awkward.flatten(df[col], axis=None)
+
+            if len(values) == 0:
+                print(f"WARNING: Branch '{col}' is empty. Skipped.")
+                continue
 
             if h is None:
                 # try to find config
                 found = None
                 for ex, data in config.histograms.items():
                     if re.match(ex, col):
-                        found = data.copy()
+                        found = data.model_copy()
+                        print(
+                            "Found HistConfig",
+                            ex,
+                            "for",
+                            col,
+                            ":",
+                            found,
+                            file=sys.stderr,
+                        )
 
                 if found is None:
                     found = HistConfig()
@@ -159,16 +176,29 @@ def main(
 
     for k, h in histograms.items():
         if not silent:
-            print(k, h.axes[0])
+            if dump_yml:
+                ax = h.axes[0]
+                s = """
+{k}:
+  nbins: {b}
+  min: {min}
+  max: {max}
+                """.format(
+                    k=k, b=len(ax.edges) - 1, min=ax.edges[0], max=ax.edges[-1]
+                )
+                print(s)
+            else:
+                print(k, h.axes[0])
         outfile[k] = h
 
         if plots is not None:
             fig, ax = matplotlib.pyplot.subplots()
 
-            h.plot(ax=ax)
+            h.plot(ax=ax, flow=None)
 
             fig.tight_layout()
             fig.savefig(str(plots / f"{k}.{plot_format}"))
+            matplotlib.pyplot.close()
 
 
 if __name__ == "__main__":

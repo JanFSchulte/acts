@@ -1,23 +1,25 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/MaterialMapping/MaterialMapping.hpp"
 
-#include "ActsExamples/Framework/WhiteBoard.hpp"
+#include "Acts/Material/AccumulatedMaterialSlab.hpp"
+#include "Acts/Material/AccumulatedSurfaceMaterial.hpp"
+#include "ActsExamples/MaterialMapping/IMaterialWriter.hpp"
 
-#include <iostream>
 #include <stdexcept>
 #include <unordered_map>
 
-ActsExamples::MaterialMapping::MaterialMapping(
-    const ActsExamples::MaterialMapping::Config& cfg,
-    Acts::Logging::Level level)
-    : ActsExamples::BareAlgorithm("MaterialMapping", level),
+namespace ActsExamples {
+
+MaterialMapping::MaterialMapping(const MaterialMapping::Config& cfg,
+                                 Acts::Logging::Level level)
+    : IAlgorithm("MaterialMapping", level),
       m_cfg(cfg),
       m_mappingState(cfg.geoContext, cfg.magFieldContext),
       m_mappingStateVol(cfg.geoContext, cfg.magFieldContext) {
@@ -26,6 +28,9 @@ ActsExamples::MaterialMapping::MaterialMapping(
   } else if (!m_cfg.trackingGeometry) {
     throw std::invalid_argument("Missing tracking geometry");
   }
+
+  m_inputMaterialTracks.initialize(m_cfg.inputMaterialTracks);
+  m_outputMaterialTracks.initialize(m_cfg.mappingMaterialCollection);
 
   ACTS_INFO("This algorithm requires inter-event information, "
             << "run in single-threaded mode!");
@@ -42,8 +47,9 @@ ActsExamples::MaterialMapping::MaterialMapping(
   }
 }
 
-ActsExamples::MaterialMapping::~MaterialMapping() {
-  Acts::DetectorMaterialMaps detectorMaterial;
+ProcessCode MaterialMapping::finalize() {
+  ACTS_INFO("Finalizing material mappig output");
+  Acts::TrackingGeometryMaterial detectorMaterial;
 
   if (m_cfg.materialSurfaceMapper && m_cfg.materialVolumeMapper) {
     // Finalize all the maps using the cached state
@@ -87,20 +93,22 @@ ActsExamples::MaterialMapping::~MaterialMapping() {
   for (auto& imw : m_cfg.materialWriters) {
     imw->writeMaterial(detectorMaterial);
   }
+
+  return ProcessCode::SUCCESS;
 }
 
-ActsExamples::ProcessCode ActsExamples::MaterialMapping::execute(
-    const ActsExamples::AlgorithmContext& context) const {
+ProcessCode MaterialMapping::execute(const AlgorithmContext& context) const {
   // Take the collection from the EventStore
-  std::unordered_map<size_t, Acts::RecordedMaterialTrack> mtrackCollection =
-      context.eventStore
-          .get<std::unordered_map<size_t, Acts::RecordedMaterialTrack>>(
-              m_cfg.collection);
+  std::unordered_map<std::size_t, Acts::RecordedMaterialTrack>
+      mtrackCollection = m_inputMaterialTracks(context);
 
   if (m_cfg.materialSurfaceMapper) {
     // To make it work with the framework needs a lock guard
     auto mappingState =
         const_cast<Acts::SurfaceMaterialMapper::State*>(&m_mappingState);
+    // Set the geometry and magnetic field context
+    (*mappingState).geoContext = context.geoContext;
+    (*mappingState).magFieldContext = context.magFieldContext;
     for (auto& [idTrack, mTrack] : mtrackCollection) {
       // Map this one onto the geometry
       m_cfg.materialSurfaceMapper->mapMaterialTrack(*mappingState, mTrack);
@@ -110,6 +118,9 @@ ActsExamples::ProcessCode ActsExamples::MaterialMapping::execute(
     // To make it work with the framework needs a lock guard
     auto mappingState =
         const_cast<Acts::VolumeMaterialMapper::State*>(&m_mappingStateVol);
+    // Set the geometry and magnetic field context
+    (*mappingState).geoContext = context.geoContext;
+    (*mappingState).magFieldContext = context.magFieldContext;
 
     for (auto& [idTrack, mTrack] : mtrackCollection) {
       // Map this one onto the geometry
@@ -117,13 +128,12 @@ ActsExamples::ProcessCode ActsExamples::MaterialMapping::execute(
     }
   }
   // Write take the collection to the EventStore
-  context.eventStore.add(m_cfg.mappingMaterialCollection,
-                         std::move(mtrackCollection));
-  return ActsExamples::ProcessCode::SUCCESS;
+  m_outputMaterialTracks(context, std::move(mtrackCollection));
+  return ProcessCode::SUCCESS;
 }
 
-std::vector<std::pair<double, int>>
-ActsExamples::MaterialMapping::scoringParameters(uint64_t surfaceID) {
+std::vector<std::pair<double, int>> MaterialMapping::scoringParameters(
+    std::uint64_t surfaceID) {
   std::vector<std::pair<double, int>> scoringParameters;
 
   if (m_cfg.materialSurfaceMapper) {
@@ -145,3 +155,5 @@ ActsExamples::MaterialMapping::scoringParameters(uint64_t surfaceID) {
   }
   return scoringParameters;
 }
+
+}  // namespace ActsExamples

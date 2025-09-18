@@ -1,24 +1,18 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2018-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
-#include "Acts/EventData/Charge.hpp"
-#include "Acts/EventData/SingleCurvilinearTrackParameters.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/MagneticField/MagneticFieldContext.hpp"
-#include "Acts/Propagator/AbortList.hpp"
-#include "Acts/Propagator/ActionList.hpp"
-#include "Acts/Propagator/Propagator.hpp"
-#include "Acts/Propagator/StandardAborters.hpp"
+#include "Acts/Propagator/ActorList.hpp"
 #include "Acts/Utilities/Logger.hpp"
 #include "Acts/Utilities/Result.hpp"
-#include "ActsFatras/EventData/Hit.hpp"
 #include "ActsFatras/EventData/Particle.hpp"
 #include "ActsFatras/Kernel/SimulationResult.hpp"
 #include "ActsFatras/Kernel/detail/SimulationActor.hpp"
@@ -43,24 +37,23 @@ template <typename propagator_t, typename interactions_t,
 struct SingleParticleSimulation {
   /// How and within which geometry to propagate the particle.
   propagator_t propagator;
+  /// Absolute maximum step size
+  double maxStepSize = std::numeric_limits<double>::max();
+  /// Absolute maximum path length
+  double pathLimit = std::numeric_limits<double>::max();
   /// Decay module.
   decay_t decay;
   /// Interaction list containing the simulated interactions.
   interactions_t interactions;
   /// Selector for surfaces that should generate hits.
   hit_surface_selector_t selectHitSurface;
-  /// Wrapped logger for debug output.
-  Acts::LoggerWrapper loggerWrapper = Acts::getDummyLogger();
-  /// Local logger for debug output.
-  std::shared_ptr<const Acts::Logger> localLogger = nullptr;
+  /// Logger for debug output.
+  std::unique_ptr<const Acts::Logger> logger;
 
   /// Alternatively construct the simulator with an external logger.
   SingleParticleSimulation(propagator_t &&propagator_,
-                           std::shared_ptr<const Acts::Logger> localLogger_)
-      : propagator(propagator_), localLogger(std::move(localLogger_)) {}
-
-  /// Provide access to the local logger instance, e.g. for logging macros.
-  const Acts::Logger &logger() const { return *localLogger; }
+                           std::unique_ptr<const Acts::Logger> _logger)
+      : propagator(propagator_), logger(std::move(_logger)) {}
 
   /// Simulate a single particle without secondaries.
   ///
@@ -76,38 +69,42 @@ struct SingleParticleSimulation {
       const Acts::GeometryContext &geoCtx,
       const Acts::MagneticFieldContext &magCtx, generator_t &generator,
       const Particle &particle) const {
-    assert(localLogger and "Missing local logger");
     // propagator-related additional types
     using Actor = detail::SimulationActor<generator_t, decay_t, interactions_t,
                                           hit_surface_selector_t>;
-    using Aborter = typename Actor::ParticleNotAlive;
     using Result = typename Actor::result_type;
-    using Actions = Acts::ActionList<Actor>;
-    using Abort = Acts::AbortList<Aborter, Acts::EndOfWorldReached>;
-    using PropagatorOptions = Acts::PropagatorOptions<Actions, Abort>;
+    using ActorList = Acts::ActorList<Actor>;
+    using PropagatorOptions =
+        typename propagator_t::template Options<ActorList>;
 
     // Construct per-call options.
-    PropagatorOptions options(geoCtx, magCtx,
-                              Acts::LoggerWrapper{*localLogger});
-    options.absPdgCode = Acts::makeAbsolutePdgParticle(particle.pdg());
-    options.mass = particle.mass();
+    PropagatorOptions options(geoCtx, magCtx);
+    options.stepping.maxStepSize = maxStepSize;
+    options.pathLimit = pathLimit;
     // setup the interactor as part of the propagator options
-    auto &actor = options.actionList.template get<Actor>();
+    auto &actor = options.actorList.template get<Actor>();
     actor.generator = &generator;
     actor.decay = decay;
     actor.interactions = interactions;
     actor.selectHitSurface = selectHitSurface;
     actor.initialParticle = particle;
-    // use AnyCharge to be able to handle neutral and charged parameters
-    Acts::SingleCurvilinearTrackParameters<Acts::AnyCharge> start(
-        particle.fourPosition(), particle.unitDirection(),
-        particle.absoluteMomentum(), particle.charge());
-    auto result = propagator.propagate(start, options);
-    if (not result.ok()) {
+
+    if (particle.hasReferenceSurface()) {
+      auto result = propagator.propagate(
+          particle.boundParameters(geoCtx).value(), options);
+      if (!result.ok()) {
+        return result.error();
+      }
+      auto &value = result.value().template get<Result>();
+      return std::move(value);
+    }
+
+    auto result =
+        propagator.propagate(particle.curvilinearParameters(), options);
+    if (!result.ok()) {
       return result.error();
     }
     auto &value = result.value().template get<Result>();
-
     return std::move(value);
   }
 };
@@ -191,7 +188,7 @@ struct Simulation {
       output_particles_t &simulatedParticlesInitial,
       output_particles_t &simulatedParticlesFinal, hits_t &hits) const {
     assert(
-        (simulatedParticlesInitial.size() == simulatedParticlesFinal.size()) and
+        (simulatedParticlesInitial.size() == simulatedParticlesFinal.size()) &&
         "Inconsistent initial sizes of the simulated particle containers");
 
     using SingleParticleSimulationResult = Acts::Result<SimulationResult>;
@@ -200,11 +197,11 @@ struct Simulation {
 
     for (const Particle &inputParticle : inputParticles) {
       // only consider simulatable particles
-      if (not selectParticle(inputParticle)) {
+      if (!selectParticle(inputParticle)) {
         continue;
       }
       // required to allow correct particle id numbering for secondaries later
-      if ((inputParticle.particleId().generation() != 0u) or
+      if ((inputParticle.particleId().generation() != 0u) ||
           (inputParticle.particleId().subParticle() != 0u)) {
         return detail::SimulationError::eInvalidInputParticleId;
       }
@@ -227,13 +224,13 @@ struct Simulation {
         // only need to switch between charged/neutral.
         SingleParticleSimulationResult result =
             SingleParticleSimulationResult::success({});
-        if (initialParticle.charge() != Particle::Scalar(0)) {
+        if (initialParticle.charge() != 0.) {
           result = charged.simulate(geoCtx, magCtx, generator, initialParticle);
         } else {
           result = neutral.simulate(geoCtx, magCtx, generator, initialParticle);
         }
 
-        if (not result.ok()) {
+        if (!result.ok()) {
           // remove particle from output container since it was not simulated.
           simulatedParticlesInitial.erase(
               std::next(simulatedParticlesInitial.begin(), iinitial));
@@ -241,6 +238,9 @@ struct Simulation {
           failedParticles.push_back({initialParticle, result.error()});
           continue;
         }
+
+        assert(result->particle.particleId() == initialParticle.particleId() &&
+               "Particle id must not change during simulation");
 
         copyOutputs(result.value(), simulatedParticlesInitial,
                     simulatedParticlesFinal, hits);
@@ -253,7 +253,11 @@ struct Simulation {
       }
     }
 
-    // the overall function call succeeded, i.e. no fatal errors occured.
+    assert(
+        (simulatedParticlesInitial.size() == simulatedParticlesFinal.size()) &&
+        "Inconsistent final sizes of the simulated particle containers");
+
+    // the overall function call succeeded, i.e. no fatal errors occurred.
     // yet, there might have been some particle for which the propagation
     // failed. thus, the successful result contains a list of failed particles.
     // sounds a bit weird, but that is the way it is.
@@ -263,7 +267,7 @@ struct Simulation {
  private:
   /// Select if the particle should be simulated at all.
   bool selectParticle(const Particle &particle) const {
-    if (particle.charge() != Particle::Scalar(0)) {
+    if (particle.charge() != 0.) {
       return selectCharged(particle);
     } else {
       return selectNeutral(particle);
@@ -281,12 +285,13 @@ struct Simulation {
     // initial particle state was already pushed to the container before
     // store final particle state at the end of the simulation
     particlesFinal.push_back(result.particle);
+    std::copy(result.hits.begin(), result.hits.end(), std::back_inserter(hits));
+
     // move generated secondaries that should be simulated to the output
     std::copy_if(
         result.generatedParticles.begin(), result.generatedParticles.end(),
         std::back_inserter(particlesInitial),
         [this](const Particle &particle) { return selectParticle(particle); });
-    std::copy(result.hits.begin(), result.hits.end(), std::back_inserter(hits));
   }
 
   /// Renumber particle ids in the tail of the container.

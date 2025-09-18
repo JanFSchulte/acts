@@ -1,12 +1,15 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
+
+#include <tuple>
+#include <utility>
 
 namespace Acts {
 /// Helper utility to allow indexed enumeration with structured binding
@@ -23,7 +26,7 @@ template <typename container_type,
           typename = decltype(std::end(std::declval<container_type>()))>
 constexpr auto enumerate(container_type &&iterable) {
   struct iterator {
-    size_t i;
+    std::size_t i;
     container_type_iter iter;
 
     bool operator!=(const iterator &rhs) const { return iter != rhs.iter; }

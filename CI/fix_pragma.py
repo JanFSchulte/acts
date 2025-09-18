@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-from __future__ import print_function
 
 import argparse
 import os
 from glob import glob
-from concurrent.futures import ProcessPoolExecutor
 import re
 
 code_format = """
@@ -40,14 +38,12 @@ def main():
     if os.path.isfile(args.input):
         headers = [args.input]
     elif os.path.isdir(args.input):
-        patterns = ["**/*.hpp", "**/*.h"]
+        patterns = ["**/*.hpp", "**/*.ipp"]
         headers = sum(
             [glob(os.path.join(args.input, p), recursive=True) for p in patterns], []
         )
     else:
         headers = glob(args.input, recursive=True)
-
-    # for h in headers: print(h)
 
     for h in headers:
         fix_pragma(h)

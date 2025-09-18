@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+
 import os
 import warnings
-from pathlib import Path
+import argparse
 
 import acts
 from acts.examples import (
@@ -14,23 +15,33 @@ from acts.examples import (
 
 import acts.examples.dd4hep
 import acts.examples.geant4
-import acts.examples.geant4.dd4hep
-from common import getOpenDataDetectorDirectory
+import acts.examples.hepmc3
+from acts.examples.odd import getOpenDataDetector
+
+try:
+    import acts.examples.geant4.geomodel
+except ImportError:
+    # geomodel is optional for this script
+    pass
 
 u = acts.UnitConstants
 
 _material_recording_executed = False
 
 
-def runMaterialRecording(g4geo, outputDir, tracksPerEvent=10000, s=None):
+def runMaterialRecording(
+    detector,
+    outputDir,
+    tracksPerEvent=10000,
+    s=None,
+    etaRange=(-4, 4),
+):
     global _material_recording_executed
     if _material_recording_executed:
         warnings.warn("Material recording already ran in this process. Expect crashes")
     _material_recording_executed = True
 
     rnd = RandomNumbers(seed=228)
-
-    s = s or acts.examples.Sequencer(events=1000, numThreads=1)
 
     evGen = EventGenerator(
         level=acts.logging.INFO,
@@ -42,31 +53,37 @@ def runMaterialRecording(g4geo, outputDir, tracksPerEvent=10000, s=None):
                     mean=acts.Vector4(0, 0, 0, 0),
                 ),
                 particles=ParametricParticleGenerator(
+                    pdg=acts.PdgParticle.eInvalid,
+                    charge=0,
+                    randomizeCharge=False,
+                    mass=0,
                     p=(1 * u.GeV, 10 * u.GeV),
-                    eta=(-4, 4),
+                    eta=etaRange,
                     numParticles=tracksPerEvent,
                     etaUniform=True,
                 ),
             )
         ],
-        outputParticles="particles_initial",
         randomNumbers=rnd,
     )
 
     s.addReader(evGen)
 
-    g4AlgCfg = acts.examples.geant4.materialRecordingConfig(
+    hepmc3Converter = acts.examples.hepmc3.HepMC3InputConverter(
         level=acts.logging.INFO,
-        detector=g4geo,
-        inputParticles=evGen.config.outputParticles,
-        outputMaterialTracks="material_tracks",
-        randomNumbers=rnd,
+        inputEvent=evGen.config.outputEvent,
+        outputParticles="particles_initial",
+        outputVertices="vertices_initial",
+        mergePrimaries=False,
     )
+    s.addAlgorithm(hepmc3Converter)
 
-    g4AlgCfg.detectorConstruction = g4geo
-
-    g4Alg = acts.examples.geant4.Geant4Simulation(
-        level=acts.logging.INFO, config=g4AlgCfg
+    g4Alg = acts.examples.geant4.Geant4MaterialRecording(
+        level=acts.logging.INFO,
+        detector=detector,
+        randomNumbers=rnd,
+        inputParticles=hepmc3Converter.config.outputParticles,
+        outputMaterialTracks="material-tracks",
     )
 
     s.addAlgorithm(g4Alg)
@@ -75,7 +92,7 @@ def runMaterialRecording(g4geo, outputDir, tracksPerEvent=10000, s=None):
         acts.examples.RootMaterialTrackWriter(
             prePostStep=True,
             recalculateTotals=True,
-            collection="material_tracks",
+            inputMaterialTracks="material-tracks",
             filePath=os.path.join(outputDir, "geant4_material_tracks.root"),
             level=acts.logging.INFO,
         )
@@ -84,11 +101,36 @@ def runMaterialRecording(g4geo, outputDir, tracksPerEvent=10000, s=None):
     return s
 
 
-if "__main__" == __name__:
-
-    dd4hepSvc = acts.examples.dd4hep.DD4hepGeometryService(
-        xmlFileNames=[str(getOpenDataDetectorDirectory() / "xml/OpenDataDetector.xml")]
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument(
+        "-n", "--events", type=int, default=1000, help="Number of events to generate"
     )
-    g4geo = acts.examples.geant4.dd4hep.DDG4DetectorConstruction(dd4hepSvc)
+    p.add_argument(
+        "-t", "--tracks", type=int, default=100, help="Particle tracks per event"
+    )
+    p.add_argument(
+        "-i", "--input", type=str, default="", help="input (GDML/SQL) file (optional)"
+    )
 
-    runMaterialRecording(g4geo=g4geo, tracksPerEvent=100, outputDir=os.getcwd()).run()
+    args = p.parse_args()
+
+    detector = None
+    if args.input == "":
+        detector = getOpenDataDetector()
+    elif args.input.endswith(".gdml"):
+        detector = acts.examples.geant4.GdmlDetector(path=args.input)
+    elif args.input.endswith(".sqlite") or args.input.endswith(".db"):
+        gmdConfig = acts.geomodel.GeoModelDetector.Config(path=args.input)
+        detector = acts.geomodel.GeoModelDetector(gmdConfig)
+
+    runMaterialRecording(
+        detector=detector,
+        tracksPerEvent=args.tracks,
+        outputDir=os.getcwd(),
+        s=acts.examples.Sequencer(events=args.events, numThreads=1),
+    ).run()
+
+
+if "__main__" == __name__:
+    main()

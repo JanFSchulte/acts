@@ -1,17 +1,20 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Geometry/GeometryHierarchyMap.hpp"
+#include "Acts/Geometry/GeometryIdentifier.hpp"
 
 #include <iterator>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -19,7 +22,7 @@ using Acts::GeometryIdentifier;
 
 // helper function to create geometry ids
 GeometryIdentifier makeId(int volume = 0, int layer = 0, int sensitive = 0) {
-  return GeometryIdentifier().setVolume(volume).setLayer(layer).setSensitive(
+  return GeometryIdentifier().withVolume(volume).withLayer(layer).withSensitive(
       sensitive);
 }
 
@@ -81,7 +84,7 @@ BOOST_AUTO_TEST_CASE(ConstructInitializerList) {
       {makeId(), {23.0}},
   };
   BOOST_CHECK_EQUAL(std::next(c.begin(), 4), c.end());
-  BOOST_CHECK(not c.empty());
+  BOOST_CHECK(!c.empty());
   BOOST_CHECK_EQUAL(c.size(), 4u);
   // only test that all elements are there; failure test are below
   CHECK_ENTRY(c, makeId(0, 1, 2), makeId(0, 1, 2));
@@ -97,7 +100,7 @@ BOOST_AUTO_TEST_CASE(IndexBasedAccess) {
       {makeId(4, 5, 7), {4.0}},
   });
 
-  BOOST_CHECK(not c.empty());
+  BOOST_CHECK(!c.empty());
   BOOST_CHECK_EQUAL(c.size(), 4u);
   // this tests just that the index-based access works
   // NOTE order is undefined and should not be tested
@@ -127,7 +130,7 @@ BOOST_AUTO_TEST_CASE(Find) {
 
   // basic checks
   BOOST_CHECK_EQUAL(std::next(c.begin(), 4u), c.end());
-  BOOST_CHECK(not c.empty());
+  BOOST_CHECK(!c.empty());
   BOOST_CHECK_EQUAL(c.size(), 4u);
 
   // find existing sensitive
@@ -170,7 +173,7 @@ BOOST_AUTO_TEST_CASE(FindWithGlobalDefault) {
 
   // basic checks
   BOOST_CHECK_EQUAL(std::next(c.begin(), 3u), c.end());
-  BOOST_CHECK(not c.empty());
+  BOOST_CHECK(!c.empty());
   BOOST_CHECK_EQUAL(c.size(), 3u);
 
   // find existing entries

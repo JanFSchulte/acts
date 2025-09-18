@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -12,7 +12,6 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
-#include <memory>
 #include <utility>
 
 // #define _ACTS_ANY_ENABLE_VERBOSE
@@ -40,13 +39,13 @@
 
 #if defined(_ACTS_ANY_ENABLE_VERBOSE)
 #define _ACTS_ANY_VERBOSE(x) std::cout << x << std::endl;
-#define _ACTS_ANY_VERBOSE_BUFFER(s, b) \
-  do {                                 \
-    std::cout << "" << s << ": 0x";    \
-    for (char c : b) {                 \
-      std::cout << std::hex << (int)c; \
-    }                                  \
-    std::cout << std::endl;            \
+#define _ACTS_ANY_VERBOSE_BUFFER(s, b)              \
+  do {                                              \
+    std::cout << "" << s << ": 0x";                 \
+    for (char c : b) {                              \
+      std::cout << std::hex << static_cast<int>(c); \
+    }                                               \
+    std::cout << std::endl;                         \
   } while (0)
 #else
 #define _ACTS_ANY_VERBOSE(x)
@@ -78,6 +77,9 @@ static std::set<std::pair<std::type_index, void*>> _s_any_allocations;
     _s_any_allocations.erase(it);                                             \
   } while (0)
 
+// Do not make member functions noexcept in the debug case
+#define _ACTS_ANY_NOEXCEPT /*nothing*/
+
 struct _AnyAllocationReporter {
   static void checkAllocations() {
     std::lock_guard guard{_s_any_mutex};
@@ -101,12 +103,13 @@ static _AnyAllocationReporter s_reporter;
 #define _ACTS_ANY_TRACK_DEALLOCATION(T, heap) \
   do {                                        \
   } while (0)
+#define _ACTS_ANY_NOEXCEPT noexcept
 #endif
 
 class AnyBaseAll {};
 
 /// Small opaque cache type which uses small buffer optimization
-template <size_t SIZE>
+template <std::size_t SIZE>
 class AnyBase : public AnyBaseAll {
   static_assert(sizeof(void*) <= SIZE, "Size is too small for a pointer");
 
@@ -122,14 +125,16 @@ class AnyBase : public AnyBaseAll {
         "Type needs to be copy assignable and copy constructible");
 
     m_handler = makeHandler<U>();
-    if constexpr (not heapAllocated<U>()) {
+    if constexpr (!heapAllocated<U>()) {
       // construct into local buffer
       /*U* ptr =*/new (m_data.data()) U(std::forward<Args>(args)...);
-      _ACTS_ANY_VERBOSE(
-          "Construct local (this=" << this << ") at: " << (void*)m_data.data());
+      _ACTS_ANY_VERBOSE("Construct local (this="
+                        << this
+                        << ") at: " << static_cast<void*>(m_data.data()));
     } else {
       // too large, heap allocate
       U* heap = new U(std::forward<Args>(args)...);
+      _ACTS_ANY_DEBUG("Allocate type: " << typeid(U).name() << " at " << heap);
       _ACTS_ANY_TRACK_ALLOCATION(T, heap);
       setDataPtr(heap);
     }
@@ -141,9 +146,9 @@ class AnyBase : public AnyBaseAll {
   AnyBase() = default;
 #endif
 
-  template <typename T, typename = std::enable_if_t<
-                            !std::is_same_v<std::decay_t<T>, AnyBase<SIZE>>>>
-  explicit AnyBase(T&& value)
+  template <typename T>
+  explicit AnyBase(T&& value) _ACTS_ANY_NOEXCEPT
+    requires(!std::same_as<std::decay_t<T>, AnyBase<SIZE>>)
       : AnyBase{std::in_place_type<T>, std::forward<T>(value)} {}
 
   template <typename T>
@@ -175,44 +180,46 @@ class AnyBase : public AnyBaseAll {
 
   ~AnyBase() { destroy(); }
 
-  AnyBase(const AnyBase& other) {
+  AnyBase(const AnyBase& other) _ACTS_ANY_NOEXCEPT {
     if (m_handler == nullptr && other.m_handler == nullptr) {
       // both are empty, noop
       return;
     }
 
-    _ACTS_ANY_VERBOSE(
-        "Copy construct (this=" << this << ") at: " << (void*)m_data.data());
+    _ACTS_ANY_VERBOSE("Copy construct (this="
+                      << this << ") at: " << static_cast<void*>(m_data.data()));
 
     m_handler = other.m_handler;
     copyConstruct(other);
   }
 
-  AnyBase& operator=(const AnyBase& other) {
-    _ACTS_ANY_VERBOSE("Copy assign (this=" << this
-                                           << ") at: " << (void*)m_data.data());
+  AnyBase& operator=(const AnyBase& other) _ACTS_ANY_NOEXCEPT {
+    _ACTS_ANY_VERBOSE("Copy assign (this="
+                      << this << ") at: " << static_cast<void*>(m_data.data()));
 
     if (m_handler == nullptr && other.m_handler == nullptr) {
       // both are empty, noop
       return *this;
     }
 
-    if (m_handler == nullptr) {  // this object is empty
-      m_handler = other.m_handler;
-      copyConstruct(other);
+    if (m_handler == other.m_handler) {
+      // same type, but checked before they're not both nullptr
+      copy(std::move(other));
     } else {
-      // @TODO: Support assigning between different types
-      if (m_handler != other.m_handler) {
-        throw std::bad_any_cast{};
+      if (m_handler != nullptr) {
+        // this object is not empty, but have different types => destroy
+        destroy();
       }
-      copy(other);
+      assert(m_handler == nullptr);
+      m_handler = other.m_handler;
+      copyConstruct(std::move(other));
     }
     return *this;
   }
 
-  AnyBase(AnyBase&& other) {
-    _ACTS_ANY_VERBOSE(
-        "Move construct (this=" << this << ") at: " << (void*)m_data.data());
+  AnyBase(AnyBase&& other) _ACTS_ANY_NOEXCEPT {
+    _ACTS_ANY_VERBOSE("Move construct (this="
+                      << this << ") at: " << static_cast<void*>(m_data.data()));
     if (m_handler == nullptr && other.m_handler == nullptr) {
       // both are empty, noop
       return;
@@ -222,28 +229,31 @@ class AnyBase : public AnyBaseAll {
     moveConstruct(std::move(other));
   }
 
-  AnyBase& operator=(AnyBase&& other) {
-    _ACTS_ANY_VERBOSE("Move assign (this=" << this
-                                           << ") at: " << (void*)m_data.data());
+  AnyBase& operator=(AnyBase&& other) _ACTS_ANY_NOEXCEPT {
+    _ACTS_ANY_VERBOSE("Move assign (this="
+                      << this << ") at: " << static_cast<void*>(m_data.data()));
     if (m_handler == nullptr && other.m_handler == nullptr) {
       // both are empty, noop
       return *this;
     }
 
-    if (m_handler == nullptr) {  // this object is empty
+    if (m_handler == other.m_handler) {
+      // same type, but checked before they're not both nullptr
+      move(std::move(other));
+    } else {
+      if (m_handler != nullptr) {
+        // this object is not empty, but have different types => destroy
+        destroy();
+      }
+      assert(m_handler == nullptr);
       m_handler = other.m_handler;
       moveConstruct(std::move(other));
-    } else {
-      // @TODO: Support assigning between different types
-      if (m_handler != other.m_handler) {
-        throw std::bad_any_cast{};
-      }
-      move(std::move(other));
     }
+
     return *this;
   }
 
-  operator bool() const { return m_handler != nullptr; }
+  explicit operator bool() const { return m_handler != nullptr; }
 
  private:
   void* dataPtr() {
@@ -322,9 +332,10 @@ class AnyBase : public AnyBaseAll {
   void destroy() {
     _ACTS_ANY_VERBOSE("Destructor this=" << this << " handler: " << m_handler);
     if (m_handler != nullptr && m_handler->destroy != nullptr) {
+      _ACTS_ANY_VERBOSE("Non-trivial destruction");
       m_handler->destroy(dataPtr());
-      m_handler = nullptr;
     }
+    m_handler = nullptr;
   }
 
   void moveConstruct(AnyBase&& fromAny) {
@@ -343,6 +354,7 @@ class AnyBase : public AnyBaseAll {
     }
 
     if (m_handler->moveConstruct == nullptr) {
+      _ACTS_ANY_VERBOSE("Trivially move construct");
       // trivially move constructible
       m_data = std::move(fromAny.m_data);
     } else {
@@ -368,6 +380,7 @@ class AnyBase : public AnyBaseAll {
     }
 
     if (m_handler->move == nullptr) {
+      _ACTS_ANY_VERBOSE("Trivially move");
       // trivially movable
       m_data = std::move(fromAny.m_data);
     } else {
@@ -384,6 +397,7 @@ class AnyBase : public AnyBaseAll {
     const void* from = fromAny.dataPtr();
 
     if (m_handler->copyConstruct == nullptr) {
+      _ACTS_ANY_VERBOSE("Trivially copy construct");
       // trivially copy constructible
       m_data = fromAny.m_data;
     } else {
@@ -405,6 +419,7 @@ class AnyBase : public AnyBaseAll {
     const void* from = fromAny.dataPtr();
 
     if (m_handler->copy == nullptr) {
+      _ACTS_ANY_VERBOSE("Trivially copy");
       // trivially copyable
       m_data = fromAny.m_data;
     } else {
@@ -479,18 +494,20 @@ class AnyBase : public AnyBaseAll {
     (*_to) = *_from;
   }
 
-  static constexpr size_t kMaxAlignment = std::max(alignof(std::max_align_t),
+  static constexpr std::size_t kMaxAlignment =
+      std::max(alignof(std::max_align_t),
 #if defined(__AVX512F__)
-                                                   size_t(64)
+               std::size_t{64}
 #elif defined(__AVX__)
-                                                   size_t(32)
+               std::size_t{32}
 #elif defined(__SSE__)
-                                                   size_t(16)
+               std::size_t{16}
 #else
-                                                   size_t(0)  // Neutral element
-                                                              // for maximum
+               std::size_t{0}
+  // Neutral element
+  // for maximum
 #endif
-  );
+      );
 
   alignas(kMaxAlignment) std::array<std::byte, SIZE> m_data{};
   const Handler* m_handler{nullptr};

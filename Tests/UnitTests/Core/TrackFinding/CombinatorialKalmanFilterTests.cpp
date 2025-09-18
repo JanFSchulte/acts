@@ -1,53 +1,77 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/EventData/Measurement.hpp"
+#include "Acts/Definitions/Direction.hpp"
+#include "Acts/Definitions/TrackParametrization.hpp"
+#include "Acts/Definitions/Units.hpp"
+#include "Acts/EventData/GenericBoundTrackParameters.hpp"
+#include "Acts/EventData/MultiTrajectory.hpp"
+#include "Acts/EventData/SourceLink.hpp"
+#include "Acts/EventData/TrackContainer.hpp"
 #include "Acts/EventData/TrackParameters.hpp"
+#include "Acts/EventData/TrackProxy.hpp"
 #include "Acts/EventData/VectorMultiTrajectory.hpp"
+#include "Acts/EventData/VectorTrackContainer.hpp"
+#include "Acts/EventData/detail/TestSourceLink.hpp"
 #include "Acts/Geometry/GeometryContext.hpp"
 #include "Acts/Geometry/GeometryIdentifier.hpp"
-#include "Acts/Geometry/TrackingGeometry.hpp"
 #include "Acts/MagneticField/ConstantBField.hpp"
 #include "Acts/MagneticField/MagneticFieldContext.hpp"
 #include "Acts/Propagator/EigenStepper.hpp"
 #include "Acts/Propagator/Navigator.hpp"
 #include "Acts/Propagator/Propagator.hpp"
-#include "Acts/Propagator/StandardAborters.hpp"
 #include "Acts/Propagator/StraightLineStepper.hpp"
+#include "Acts/Surfaces/CurvilinearSurface.hpp"
+#include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Tests/CommonHelpers/CubicTrackingGeometry.hpp"
-#include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 #include "Acts/Tests/CommonHelpers/MeasurementsCreator.hpp"
-#include "Acts/Tests/CommonHelpers/TestSourceLink.hpp"
 #include "Acts/TrackFinding/CombinatorialKalmanFilter.hpp"
 #include "Acts/TrackFinding/MeasurementSelector.hpp"
+#include "Acts/TrackFinding/TrackStateCreator.hpp"
 #include "Acts/TrackFitting/GainMatrixSmoother.hpp"
 #include "Acts/TrackFitting/GainMatrixUpdater.hpp"
-#include "Acts/Utilities/BinningType.hpp"
 #include "Acts/Utilities/CalibrationContext.hpp"
-#include "Acts/Utilities/Helpers.hpp"
+#include "Acts/Utilities/Holders.hpp"
+#include "Acts/Utilities/Logger.hpp"
+#include "Acts/Utilities/Result.hpp"
 
-#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <random>
+#include <string>
+#include <system_error>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace {
 
 using namespace Acts::Test;
+using namespace Acts::detail::Test;
 using namespace Acts::UnitLiterals;
+
+static const auto pion = Acts::ParticleHypothesis::pion();
+
+using TrackContainer = Acts::TrackContainer<Acts::VectorTrackContainer,
+                                            Acts::VectorMultiTrajectory,
+                                            Acts::detail::ValueHolder>;
+using TrackStateContainerBackend =
+    typename TrackContainer::TrackStateContainerBackend;
 
 struct Detector {
   // expected number of measurements for the given detector
-  size_t numMeasurements = 6u;
+  std::size_t numMeasurements = 6u;
 
   // geometry
   CubicTrackingGeometry store;
@@ -58,14 +82,14 @@ struct Detector {
   MeasurementResolution resStrip0 = {MeasurementType::eLoc0, {100_um}};
   MeasurementResolution resStrip1 = {MeasurementType::eLoc1, {150_um}};
   MeasurementResolutionMap resolutions = {
-      {Acts::GeometryIdentifier().setVolume(2), resPixel},
-      {Acts::GeometryIdentifier().setVolume(3).setLayer(2), resStrip0},
-      {Acts::GeometryIdentifier().setVolume(3).setLayer(4), resStrip1},
-      {Acts::GeometryIdentifier().setVolume(3).setLayer(6), resStrip0},
-      {Acts::GeometryIdentifier().setVolume(3).setLayer(8), resStrip1},
+      {Acts::GeometryIdentifier().withVolume(2), resPixel},
+      {Acts::GeometryIdentifier().withVolume(3).withLayer(2), resStrip0},
+      {Acts::GeometryIdentifier().withVolume(3).withLayer(4), resStrip1},
+      {Acts::GeometryIdentifier().withVolume(3).withLayer(6), resStrip0},
+      {Acts::GeometryIdentifier().withVolume(3).withLayer(8), resStrip1},
   };
 
-  Detector(const Acts::GeometryContext& geoCtx)
+  explicit Detector(const Acts::GeometryContext& geoCtx)
       : store(geoCtx), geometry(store()) {}
 };
 
@@ -96,9 +120,10 @@ struct TestContainerAccessor {
       return m_iterator == other.m_iterator;
     }
 
-    bool operator!=(const Iterator& other) const { return !(*this == other); }
-
-    const Value& operator*() const { return m_iterator->second; }
+    Acts::SourceLink operator*() const {
+      const auto& sl = m_iterator->second;
+      return Acts::SourceLink{sl};
+    }
 
     BaseIterator m_iterator;
   };
@@ -121,18 +146,15 @@ struct Fixture {
   using ConstantFieldPropagator =
       Acts::Propagator<ConstantFieldStepper, Acts::Navigator>;
 
-  using Trajectory = Acts::VectorMultiTrajectory;
-
   using KalmanUpdater = Acts::GainMatrixUpdater;
   using KalmanSmoother = Acts::GainMatrixSmoother;
   using CombinatorialKalmanFilter =
-      Acts::CombinatorialKalmanFilter<ConstantFieldPropagator, Trajectory>;
+      Acts::CombinatorialKalmanFilter<ConstantFieldPropagator, TrackContainer>;
   using TestSourceLinkContainer =
       std::unordered_multimap<Acts::GeometryIdentifier, TestSourceLink>;
   using TestSourceLinkAccessor = TestContainerAccessor<TestSourceLinkContainer>;
   using CombinatorialKalmanFilterOptions =
-      Acts::CombinatorialKalmanFilterOptions<TestSourceLinkAccessor::Iterator,
-                                             Trajectory>;
+      Acts::CombinatorialKalmanFilterOptions<TrackContainer>;
 
   KalmanUpdater kfUpdater;
   KalmanSmoother kfSmoother;
@@ -144,8 +166,8 @@ struct Fixture {
   Detector detector;
 
   // track parameters before and after the detector
-  std::vector<Acts::CurvilinearTrackParameters> startParameters;
-  std::vector<Acts::CurvilinearTrackParameters> endParameters;
+  std::vector<Acts::BoundTrackParameters> startParameters;
+  std::vector<Acts::BoundTrackParameters> endParameters;
 
   // generated measurements
   TestSourceLinkContainer sourceLinks;
@@ -161,23 +183,17 @@ struct Fixture {
 
   Acts::MeasurementSelector measSel{measurementSelectorCfg};
 
-  Acts::CombinatorialKalmanFilterExtensions<Trajectory> getExtensions() const {
-    Acts::CombinatorialKalmanFilterExtensions<Trajectory> extensions;
-    extensions.calibrator
-        .template connect<&testSourceLinkCalibrator<Trajectory>>();
-    extensions.updater.template connect<&KalmanUpdater::operator()<Trajectory>>(
-        &kfUpdater);
-    extensions.smoother
-        .template connect<&KalmanSmoother::operator()<Trajectory>>(&kfSmoother);
-    extensions.measurementSelector
-        .template connect<&Acts::MeasurementSelector::select<Trajectory>>(
-            &measSel);
+  Acts::CombinatorialKalmanFilterExtensions<TrackContainer> getExtensions()
+      const {
+    Acts::CombinatorialKalmanFilterExtensions<TrackContainer> extensions;
+    extensions.updater.template connect<
+        &KalmanUpdater::operator()<TrackStateContainerBackend>>(&kfUpdater);
     return extensions;
   }
 
   std::unique_ptr<const Acts::Logger> logger;
 
-  Fixture(double bz)
+  explicit Fixture(double bz)
       : detector(geoCtx),
         ckf(makeConstantFieldPropagator(detector.geometry, bz)),
         logger(Acts::getDefaultLogger("CkfTest", Acts::Logging::INFO)) {
@@ -190,35 +206,42 @@ struct Fixture {
     stddev[Acts::eBoundPhi] = 2_degree;
     stddev[Acts::eBoundTheta] = 2_degree;
     stddev[Acts::eBoundQOverP] = 1 / 100_GeV;
-    Acts::BoundSymMatrix cov = stddev.cwiseProduct(stddev).asDiagonal();
+    Acts::BoundSquareMatrix cov = stddev.cwiseProduct(stddev).asDiagonal();
     // all tracks close to the transverse plane along the x axis w/ small
     // variations in position, direction.
     Acts::Vector4 mStartPos0(-3_m, 0.0, 0.0, 1_ns);
     Acts::Vector4 mStartPos1(-3_m, -15_mm, -15_mm, 2_ns);
     Acts::Vector4 mStartPos2(-3_m, 15_mm, 15_mm, -1_ns);
     startParameters = {
-        {mStartPos0, 0_degree, 90_degree, 1_GeV, 1_e, cov},
-        {mStartPos1, -1_degree, 91_degree, 1_GeV, 1_e, cov},
-        {mStartPos2, 1_degree, 89_degree, 1_GeV, -1_e, cov},
+        Acts::BoundTrackParameters::createCurvilinear(
+            mStartPos0, 0_degree, 90_degree, 1_e / 1_GeV, cov, pion),
+        Acts::BoundTrackParameters::createCurvilinear(
+            mStartPos1, -1_degree, 91_degree, 1_e / 1_GeV, cov, pion),
+        Acts::BoundTrackParameters::createCurvilinear(
+            mStartPos2, 1_degree, 89_degree, -1_e / 1_GeV, cov, pion),
     };
     Acts::Vector4 mEndPos0(3_m, 0.0, 0.0, 1_ns);
     Acts::Vector4 mEndPos1(3_m, -100_mm, -100_mm, 2_ns);
     Acts::Vector4 mEndPos2(3_m, 100_mm, 100_mm, -1_ns);
     endParameters = {
-        {mEndPos0, 0_degree, 90_degree, 1_GeV, 1_e, cov * 100},
-        {mEndPos1, -1_degree, 91_degree, 1_GeV, 1_e, cov * 100},
-        {mEndPos2, 1_degree, 89_degree, 1_GeV, -1_e, cov * 100},
+        Acts::BoundTrackParameters::createCurvilinear(
+            mEndPos0, 0_degree, 90_degree, 1_e / 1_GeV, cov * 100, pion),
+        Acts::BoundTrackParameters::createCurvilinear(
+            mEndPos1, -1_degree, 91_degree, 1_e / 1_GeV, cov * 100, pion),
+        Acts::BoundTrackParameters::createCurvilinear(
+            mEndPos2, 1_degree, 89_degree, -1_e / 1_GeV, cov * 100, pion),
     };
 
     // create some measurements
     auto measPropagator = makeStraightPropagator(detector.geometry);
     std::default_random_engine rng(421235);
-    for (size_t trackId = 0u; trackId < startParameters.size(); ++trackId) {
+    for (std::size_t trackId = 0u; trackId < startParameters.size();
+         ++trackId) {
       auto measurements = createMeasurements(
           measPropagator, geoCtx, magCtx, startParameters[trackId],
           detector.resolutions, rng, trackId);
       for (auto& sl : measurements.sourceLinks) {
-        sourceLinks.emplace(sl.geometryId(), std::move(sl));
+        sourceLinks.emplace(sl.m_geometryId, std::move(sl));
       }
     }
   }
@@ -250,18 +273,41 @@ struct Fixture {
   }
 
   CombinatorialKalmanFilterOptions makeCkfOptions() const {
+    // leave the accessor empty, this will have to be set before running the CKF
     return CombinatorialKalmanFilterOptions(
-        geoCtx, magCtx, calCtx,
-        Acts::SourceLinkAccessorDelegate<
-            TestSourceLinkAccessor::Iterator>{},  // leave the accessor empty,
-                                                  // this will have to be set
-                                                  // before running the CKF
-        getExtensions(), Acts::LoggerWrapper{*logger},
-        Acts::PropagatorPlainOptions());
+        geoCtx, magCtx, calCtx, getExtensions(),
+        Acts::PropagatorPlainOptions(geoCtx, magCtx));
   }
 };
 
+// set up composable track state creator from these components:
+//  - source link accessor,
+//  - measurement selector
+//  - track  state candidate creator
+template <typename source_link_accessor_t>
+inline auto makeTrackStateCreator(const source_link_accessor_t& slAccessor,
+                                  const Acts::MeasurementSelector& measSel) {
+  using TrackStateCreatorType =
+      Acts::TrackStateCreator<typename source_link_accessor_t::Iterator,
+                              TrackContainer>;
+  TrackStateCreatorType trackStateCreator;
+  trackStateCreator.sourceLinkAccessor
+      .template connect<&source_link_accessor_t::range>(&slAccessor);
+  trackStateCreator.calibrator.template connect<
+      &testSourceLinkCalibrator<TrackStateContainerBackend>>();
+  trackStateCreator.measurementSelector.template connect<
+      &Acts::MeasurementSelector::select<TrackStateContainerBackend>>(&measSel);
+  return trackStateCreator;
+}
 }  // namespace
+
+// somehow this is not automatically instantiated
+template Acts::Result<::std::pair<
+    std::vector<TrackStateContainerBackend::TrackStateProxy>::iterator,
+    std::vector<TrackStateContainerBackend::TrackStateProxy>::iterator>>
+Acts::MeasurementSelector::select<TrackStateContainerBackend>(
+    std::vector<TrackStateContainerBackend::TrackStateProxy>&, bool&,
+    const Acts::Logger&) const;
 
 BOOST_AUTO_TEST_SUITE(TrackFindingCombinatorialKalmanFilter)
 
@@ -269,53 +315,60 @@ BOOST_AUTO_TEST_CASE(ZeroFieldForward) {
   Fixture f(0_T);
 
   auto options = f.makeCkfOptions();
-  // this is the default option. set anyways for consistency
-  options.propagatorPlainOptions.direction = Acts::NavigationDirection::Forward;
+  // this is the default option. set anyway for consistency
+  options.propagatorPlainOptions.direction = Acts::Direction::Forward();
   // Construct a plane surface as the target surface
-  auto pSurface = Acts::Surface::makeShared<Acts::PlaneSurface>(
-      Acts::Vector3{-3_m, 0., 0.}, Acts::Vector3{1., 0., 0});
-  // Set the target surface
-  options.referenceSurface = &(*pSurface);
+  std::shared_ptr<Acts::PlaneSurface> pSurface =
+      Acts::CurvilinearSurface(Acts::Vector3{-3_m, 0., 0.},
+                               Acts::Vector3{1., 0., 0})
+          .planeSurface();
 
   Fixture::TestSourceLinkAccessor slAccessor;
   slAccessor.container = &f.sourceLinks;
-  options.sourcelinkAccessor.connect<&Fixture::TestSourceLinkAccessor::range>(
-      &slAccessor);
+
+  auto trackStateCreator = makeTrackStateCreator(slAccessor, f.measSel);
+
+  options.extensions.createTrackStates
+      .template connect<&decltype(trackStateCreator)::createTrackStates>(
+          &trackStateCreator);
+
+  TrackContainer tc{Acts::VectorTrackContainer{},
+                    Acts::VectorMultiTrajectory{}};
 
   // run the CKF for all initial track states
-  auto results = f.ckf.findTracks(f.startParameters, options);
-  // There should be three track finding results with three initial track states
-  BOOST_CHECK_EQUAL(results.size(), 3u);
-
-  // check the found tracks
-  for (size_t trackId = 0u; trackId < f.startParameters.size(); ++trackId) {
-    const auto& params = f.startParameters[trackId];
-    BOOST_TEST_INFO("initial parameters before detector:\n" << params);
-
-    auto& res = results[trackId];
-    if (not res.ok()) {
+  for (std::size_t trackId = 0u; trackId < f.startParameters.size();
+       ++trackId) {
+    auto res = f.ckf.findTracks(f.startParameters.at(trackId), options, tc);
+    if (!res.ok()) {
       BOOST_TEST_INFO(res.error() << " " << res.error().message());
     }
     BOOST_REQUIRE(res.ok());
+  }
 
-    auto val = *res;
-    BOOST_CHECK_EQUAL(val.fittedStates->size(),
-                      f.detector.numMeasurements * f.startParameters.size());
+  // There should be three track finding results with three initial track states
+  BOOST_CHECK_EQUAL(tc.size(), 3u);
 
-    // with the given measurement selection cuts, only one trajectory for the
-    // given input parameters should be found.
-    BOOST_CHECK_EQUAL(val.lastMeasurementIndices.size(), 1u);
+  // check the found tracks
+  for (std::size_t trackId = 0u; trackId < f.startParameters.size();
+       ++trackId) {
+    const auto track = tc.getTrack(trackId);
+    const auto& params = f.startParameters[trackId];
+    BOOST_TEST_INFO("initial parameters before detector:\n" << params);
+
+    BOOST_CHECK_EQUAL(track.nTrackStates(), f.detector.numMeasurements);
+
     // check purity of first found track
     // find the number of hits not originating from the right track
-    size_t numHits = 0u;
-    size_t nummismatchedHits = 0u;
-    val.fittedStates->visitBackwards(
-        val.lastMeasurementIndices.front(), [&](const auto& trackState) {
-          numHits += 1u;
-          const auto& sl =
-              static_cast<const TestSourceLink&>(trackState.uncalibrated());
-          nummismatchedHits += (trackId != sl.sourceId);
-        });
+    std::size_t numHits = 0u;
+    std::size_t nummismatchedHits = 0u;
+    for (const auto trackState : track.trackStatesReversed()) {
+      numHits += 1u;
+      auto sl =
+          trackState.getUncalibratedSourceLink().template get<TestSourceLink>();
+      if (trackId != sl.sourceId) {
+        nummismatchedHits++;
+      }
+    }
 
     BOOST_CHECK_EQUAL(numHits, f.detector.numMeasurements);
     BOOST_CHECK_EQUAL(nummismatchedHits, 0u);
@@ -326,52 +379,57 @@ BOOST_AUTO_TEST_CASE(ZeroFieldBackward) {
   Fixture f(0_T);
 
   auto options = f.makeCkfOptions();
-  options.propagatorPlainOptions.direction =
-      Acts::NavigationDirection::Backward;
+  options.propagatorPlainOptions.direction = Acts::Direction::Backward();
   // Construct a plane surface as the target surface
-  auto pSurface = Acts::Surface::makeShared<Acts::PlaneSurface>(
-      Acts::Vector3{3_m, 0., 0.}, Acts::Vector3{1., 0., 0});
-  // Set the target surface
-  options.referenceSurface = &(*pSurface);
+  std::shared_ptr<Acts::PlaneSurface> pSurface =
+      Acts::CurvilinearSurface(Acts::Vector3{3_m, 0., 0.},
+                               Acts::Vector3{1., 0., 0})
+          .planeSurface();
 
   Fixture::TestSourceLinkAccessor slAccessor;
   slAccessor.container = &f.sourceLinks;
-  options.sourcelinkAccessor.connect<&Fixture::TestSourceLinkAccessor::range>(
-      &slAccessor);
+
+  auto trackStateCreator = makeTrackStateCreator(slAccessor, f.measSel);
+  options.extensions.createTrackStates
+      .template connect<&decltype(trackStateCreator)::createTrackStates>(
+          &trackStateCreator);
+
+  TrackContainer tc{Acts::VectorTrackContainer{},
+                    Acts::VectorMultiTrajectory{}};
 
   // run the CKF for all initial track states
-  auto results = f.ckf.findTracks(f.endParameters, options);
-  // There should be three found tracks with three initial track states
-  BOOST_CHECK_EQUAL(results.size(), 3u);
-
-  // check the found tracks
-  for (size_t trackId = 0u; trackId < f.endParameters.size(); ++trackId) {
-    const auto& params = f.endParameters[trackId];
-    BOOST_TEST_INFO("initial parameters after detector:\n" << params);
-
-    auto& res = results[trackId];
-    if (not res.ok()) {
+  for (std::size_t trackId = 0u; trackId < f.startParameters.size();
+       ++trackId) {
+    auto res = f.ckf.findTracks(f.endParameters.at(trackId), options, tc);
+    if (!res.ok()) {
       BOOST_TEST_INFO(res.error() << " " << res.error().message());
     }
     BOOST_REQUIRE(res.ok());
+  }
+  // There should be three found tracks with three initial track states
+  BOOST_CHECK_EQUAL(tc.size(), 3u);
 
-    auto val = *res;
-    BOOST_CHECK_EQUAL(val.fittedStates->size(),
-                      f.detector.numMeasurements * f.endParameters.size());
-    // with the given measurement selection cuts, only one trajectory for the
-    // given input parameters should be found.
-    BOOST_CHECK_EQUAL(val.lastMeasurementIndices.size(), 1u);
+  // check the found tracks
+  for (std::size_t trackId = 0u; trackId < f.endParameters.size(); ++trackId) {
+    const auto track = tc.getTrack(trackId);
+    const auto& params = f.endParameters[trackId];
+    BOOST_TEST_INFO("initial parameters after detector:\n" << params);
+
+    BOOST_CHECK_EQUAL(track.nTrackStates(), f.detector.numMeasurements);
+
     // check purity of first found track
     // find the number of hits not originating from the right track
-    size_t numHits = 0u;
-    size_t nummismatchedHits = 0u;
-    val.fittedStates->visitBackwards(
-        val.lastMeasurementIndices.front(), [&](const auto& trackState) {
-          numHits += 1u;
-          nummismatchedHits += (trackId != static_cast<const TestSourceLink&>(
-                                               trackState.uncalibrated())
-                                               .sourceId);
-        });
+    std::size_t numHits = 0u;
+    std::size_t nummismatchedHits = 0u;
+    for (const auto trackState : track.trackStatesReversed()) {
+      numHits += 1u;
+      auto sl =
+          trackState.getUncalibratedSourceLink().template get<TestSourceLink>();
+      if (trackId != sl.sourceId) {
+        nummismatchedHits++;
+      }
+    }
+
     BOOST_CHECK_EQUAL(numHits, f.detector.numMeasurements);
     BOOST_CHECK_EQUAL(nummismatchedHits, 0u);
   }

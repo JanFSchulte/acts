@@ -1,20 +1,22 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/Definitions/Algebra.hpp"
-#include "Acts/Definitions/TrackParametrization.hpp"
+#include "Acts/Definitions/Tolerance.hpp"
 #include "Acts/Surfaces/DiscBounds.hpp"
-#include "Acts/Utilities/detail/periodic.hpp"
+#include "Acts/Surfaces/SurfaceBounds.hpp"
 
 #include <array>
-#include <exception>
+#include <cmath>
+#include <iosfwd>
+#include <numbers>
 #include <vector>
 
 namespace Acts {
@@ -42,50 +44,56 @@ class AnnulusBounds : public DiscBounds {
     eSize = 7
   };
 
-  AnnulusBounds() = delete;
-
   /// @brief Default constructor from parameters
-  /// @param minR inner radius, in module system
-  /// @param maxR outer radius, in module system
-  /// @param minPhiRel right angular edge, in strip system, rel to avgPhi
-  /// @param maxPhiRel left angular edge, in strip system, rel to avgPhi
-  /// @param moduleOrigin The origin offset between the two systems.
-  /// @param avgPhi (Optional) internal rotation of this bounds object's local
-  /// frame
+  /// @param minR The inner radius of the annulus
+  /// @param maxR The outer radius of the annulus
+  /// @param minPhiRel The minimum phi relative to average phi
+  /// @param maxPhiRel The maximum phi relative to average phi
+  /// @param moduleOrigin The origin of the module in the strip frame
+  /// @param avgPhi The average phi value
   /// @note For @c morigin you need to actually calculate the cartesian
   /// offset
-  AnnulusBounds(double minR, double maxR, double minPhiRel, double maxPhiRel,
-                const Vector2& moduleOrigin = {0, 0},
-                double avgPhi = 0) noexcept(false)
+  explicit AnnulusBounds(double minR, double maxR, double minPhiRel,
+                         double maxPhiRel, const Vector2& moduleOrigin = {0, 0},
+                         double avgPhi = 0) noexcept(false)
       : AnnulusBounds({minR, maxR, minPhiRel, maxPhiRel, avgPhi,
                        moduleOrigin.x(), moduleOrigin.y()}) {}
 
-  /// Constructor - from parameters array
+  /// Constructor - from fixed size array
   ///
-  /// @param values The parameter array
-  AnnulusBounds(const std::array<double, eSize>& values) noexcept(false);
+  /// @param values The bound values stored in a fixed size array
+  explicit AnnulusBounds(const std::array<double, eSize>& values) noexcept(
+      false);
 
-  AnnulusBounds(const AnnulusBounds& source) = default;
+  BoundsType type() const final { return eAnnulus; }
 
-  SurfaceBounds::BoundsType type() const final;
+  /// @copydoc SurfaceBounds::isCartesian
+  bool isCartesian() const final { return false; }
+
+  /// @copydoc SurfaceBounds::boundToCartesianJacobian
+  SquareMatrix2 boundToCartesianJacobian(const Vector2& lposition) const final;
+
+  /// @copydoc SurfaceBounds::boundToCartesianMetric
+  SquareMatrix2 boundToCartesianMetric(const Vector2& lposition) const final;
 
   /// Return the bound values as dynamically sized vector
-  ///
   /// @return this returns a copy of the internal values
   std::vector<double> values() const final;
 
-  /// Inside check for the bounds object driven by the boundary check directive
-  /// Each Bounds has a method inside, which checks if a LocalPosition is inside
-  /// the bounds  Inside can be called without/with tolerances.
-  ///
-  /// @param lposition Local position (assumed to be in right surface frame)
-  /// @param bcheck boundary check directive
-  /// @return boolean indicator for the success of this operation
-  bool inside(const Vector2& lposition,
-              const BoundaryCheck& bcheck) const final;
+  /// @copydoc SurfaceBounds::inside
+  bool inside(const Vector2& lposition) const final;
+
+  /// @copydoc SurfaceBounds::closestPoint
+  Vector2 closestPoint(const Vector2& lposition,
+                       const SquareMatrix2& metric) const final;
+
+  using SurfaceBounds::inside;
+
+  /// @copydoc SurfaceBounds::center
+  /// @note For AnnulusBounds: returns pre-calculated center from corner vertices in strip polar coordinates (r, phi), accounting for average phi rotation
+  Vector2 center() const final;
 
   /// Outstream operator
-  ///
   /// @param sl is the ostream to be dumped into
   std::ostream& toStream(std::ostream& sl) const final;
 
@@ -95,24 +103,29 @@ class AnnulusBounds : public DiscBounds {
 
   /// @brief Returns the right angular edge of the module
   /// @return The right side angle
-  double phiMin() const;
+  double phiMin() const { return get(eMinPhiRel) + get(eAveragePhi); }
 
   /// @brief Returns the left angular edge of the module
   /// @return The left side angle
-  double phiMax() const;
+  double phiMax() const { return get(eMaxPhiRel) + get(eAveragePhi); }
 
   /// Returns true for full phi coverage
-  bool coversFullAzimuth() const final;
+  bool coversFullAzimuth() const final {
+    return (std::abs((get(eMinPhiRel) - get(eMaxPhiRel)) - std::numbers::pi) <
+            s_onSurfaceTolerance);
+  }
 
   /// Checks if this is inside the radial coverage
   /// given the a tolerance
-  bool insideRadialBounds(double R, double tolerance = 0.) const final;
+  bool insideRadialBounds(double R, double tolerance = 0.) const final {
+    return ((R + tolerance) > get(eMinR) && (R - tolerance) < get(eMaxR));
+  }
 
   /// Return a reference radius for binning
-  double binningValueR() const final;
+  double binningValueR() const final { return 0.5 * (get(eMinR) + get(eMaxR)); }
 
   /// Return a reference radius for binning
-  double binningValuePhi() const final;
+  double binningValuePhi() const final { return get(eAveragePhi); }
 
   /// @brief Returns moduleOrigin, but rotated out, so @c averagePhi is already
   /// considered. The module origin needs to consider the rotation introduced by
@@ -121,145 +134,79 @@ class AnnulusBounds : public DiscBounds {
   Vector2 moduleOrigin() const;
 
   /// This method returns the four corners of the bounds in polar coordinates
-  /// Starting from the upper right (max R, pos locX) and proceding clock-wise
+  /// Starting from the upper right (max R, pos locX) and proceeding clock-wise
   /// i.e. (max R; pos locX), (min R; pos locX), (min R; neg loc X), (max R: neg
   /// locX)
   std::vector<Vector2> corners() const;
 
   /// This method returns the xy coordinates of the four corners of the
-  /// bounds in module coorindates (in x/y)
-  /// Starting from the upper right (max R, pos locX) and proceding clock-wise
+  /// bounds in module coordinates (in x/y), and if quarterSegments is bigger or
+  /// equal to 0, the curved part of the segment is included and approximated
+  /// by the corresponding number of segments.
+  ///
+  /// Starting from the upper right (max R, pos locX) and proceeding clock-wise
   /// i.e. (max R; pos locX), (min R; pos locX), (min R; neg loc X), (max R: neg
   /// locX)
   ///
-  /// @param lseg the number of segments used to approximate
-  /// and eventually curved line
-  ///
-  /// @note that that if @c lseg > 0, the extrema points are given,
-  ///  which may slightly alter the number of segments returned
+  /// @param quarterSegments the number of segments used to approximate
+  /// a quarter of a circle
   ///
   /// @return vector for vertices in 2D
-  std::vector<Vector2> vertices(unsigned int lseg) const override;
+  std::vector<Vector2> vertices(
+      unsigned int quarterSegments = 2u) const override;
 
   /// This method returns inner radius
-  double rMin() const final;
+  double rMin() const final { return get(eMinR); }
 
   /// This method returns outer radius
-  double rMax() const final;
+  double rMax() const final { return get(eMaxR); }
 
  private:
   std::array<double, eSize> m_values;
 
   // @TODO: Does this need to be in bound values?
-  Vector2 m_moduleOrigin;
-  Vector2 m_shiftXY;  // == -m_moduleOrigin
-  Vector2 m_shiftPC;
-  Transform2 m_rotationStripPC;
-  Transform2 m_translation;
+  Vector2 m_moduleOrigin{
+      Vector2::Zero()};  ///< The origin of the module in the strip frame
+  Vector2 m_shiftXY{Vector2::Zero()};  // == -m_moduleOrigin
+  Vector2 m_shiftPC{Vector2::Zero()};
+  Transform2 m_rotationStripPC{Transform2::Identity()};  ///< Rotation to strip
+  Transform2 m_translation{Transform2::Identity()};  ///< Translation to strip
 
   // Vectors needed for inside checking
-  Vector2 m_outLeftStripPC;
-  Vector2 m_inLeftStripPC;
-  Vector2 m_outRightStripPC;
-  Vector2 m_inRightStripPC;
+  Vector2 m_outLeftStripPC{Vector2::Zero()};
+  Vector2 m_inLeftStripPC{Vector2::Zero()};
+  Vector2 m_outRightStripPC{Vector2::Zero()};
+  Vector2 m_inRightStripPC{Vector2::Zero()};
 
-  Vector2 m_outLeftModulePC;
-  Vector2 m_inLeftModulePC;
-  Vector2 m_outRightModulePC;
-  Vector2 m_inRightModulePC;
+  Vector2 m_outLeftModulePC{Vector2::Zero()};
+  Vector2 m_inLeftModulePC{Vector2::Zero()};
+  Vector2 m_outRightModulePC{Vector2::Zero()};
+  Vector2 m_inRightModulePC{Vector2::Zero()};
 
-  Vector2 m_outLeftStripXY;
-  Vector2 m_inLeftStripXY;
-  Vector2 m_outRightStripXY;
-  Vector2 m_inRightStripXY;
+  Vector2 m_outLeftStripXY{Vector2::Zero()};
+  Vector2 m_inLeftStripXY{Vector2::Zero()};
+  Vector2 m_outRightStripXY{Vector2::Zero()};
+  Vector2 m_inRightStripXY{Vector2::Zero()};
+
+  /// Pre-calculated center point (average of vertices)
+  Vector2 m_center{Vector2::Zero()};
 
   /// Check the input values for consistency, will throw a logic_exception
   /// if consistency is not given
   void checkConsistency() noexcept(false);
 
-  /// Inside check for the bounds object driven by the boundary check directive
-  /// Each Bounds has a method inside, which checks if a LocalPosition is inside
-  /// the bounds  Inside can be called without/with tolerances.
-  ///
-  /// @param lposition Local position (assumed to be in right surface frame)
-  /// @param tolR tolerance on the radius
-  /// @param tolPhi tolerance on the polar angle phi
-  /// @return boolean indicator for the success of this operation
-  virtual bool inside(const Vector2& lposition, double tolR,
-                      double tolPhi) const final;
-
-  /// Transform the strip cartesien
-  /// into the module polar system
+  /// Transform the strip cartesian into the module polar system
   ///
   /// @param vStripXY the position in the cartesian strip system
   /// @return the position in the module polar coordinate system
   Vector2 stripXYToModulePC(const Vector2& vStripXY) const;
 
-  /// Private helper method
-  Vector2 closestOnSegment(const Vector2& a, const Vector2& b, const Vector2& p,
-                           const SymMatrix2& weight) const;
+  Vector2 stripPCToModulePC(const Vector2& vStripPC) const;
 
-  /// Private helper mehtod
-  double squaredNorm(const Vector2& v, const SymMatrix2& weight) const;
+  Vector2 modulePCToStripPC(const Vector2& vModulePC) const;
+
+  SquareMatrix2 stripPCToModulePCJacobian(
+      const Vector2& lpositionRotated) const;
 };
-
-inline SurfaceBounds::BoundsType AnnulusBounds::type() const {
-  return SurfaceBounds::eAnnulus;
-}
-
-inline double AnnulusBounds::rMin() const {
-  return get(eMinR);
-}
-
-inline double AnnulusBounds::rMax() const {
-  return get(eMaxR);
-}
-
-inline double AnnulusBounds::phiMin() const {
-  return get(eMinPhiRel) + get(eAveragePhi);
-}
-
-inline double AnnulusBounds::phiMax() const {
-  return get(eMaxPhiRel) + get(eAveragePhi);
-}
-
-inline bool AnnulusBounds::coversFullAzimuth() const {
-  return (std::abs((get(eMinPhiRel) - get(eMaxPhiRel)) - M_PI) <
-          s_onSurfaceTolerance);
-}
-
-inline bool AnnulusBounds::insideRadialBounds(double R,
-                                              double tolerance) const {
-  return ((R + tolerance) > get(eMinR) and (R - tolerance) < get(eMaxR));
-}
-
-inline double AnnulusBounds::binningValueR() const {
-  return 0.5 * (get(eMinR) + get(eMaxR));
-}
-
-inline double AnnulusBounds::binningValuePhi() const {
-  return get(eAveragePhi);
-}
-
-inline std::vector<double> AnnulusBounds::values() const {
-  std::vector<double> valvector;
-  valvector.insert(valvector.begin(), m_values.begin(), m_values.end());
-  return valvector;
-}
-
-inline void AnnulusBounds::checkConsistency() noexcept(false) {
-  if (get(eMinR) < 0. or get(eMaxR) < 0. or get(eMinR) > get(eMaxR) or
-      std::abs(get(eMinR) - get(eMaxR)) < s_epsilon) {
-    throw std::invalid_argument("AnnulusBounds: invalid radial setup.");
-  }
-  if (get(eMinPhiRel) != detail::radian_sym(get(eMinPhiRel)) or
-      get(eMaxPhiRel) != detail::radian_sym(get(eMaxPhiRel)) or
-      get(eMinPhiRel) > get(eMaxPhiRel)) {
-    throw std::invalid_argument("AnnulusBounds: invalid phi boundary setup.");
-  }
-  if (get(eAveragePhi) != detail::radian_sym(get(eAveragePhi))) {
-    throw std::invalid_argument("AnnulusBounds: invalid phi positioning.");
-  }
-}
 
 }  // namespace Acts

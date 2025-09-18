@@ -1,25 +1,21 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
-#include "Acts/Definitions/Units.hpp"
 #include "Acts/MagneticField/InterpolatedBFieldMap.hpp"
-#include "Acts/Utilities/Helpers.hpp"
 #include "Acts/Utilities/Logger.hpp"
-#include "ActsExamples/Framework/IService.hpp"
-#include "ActsExamples/Framework/ProcessCode.hpp"
 
 #include <array>
-#include <ios>
-#include <mutex>
-#include <sstream>
-#include <stdexcept>
+#include <cstddef>
+#include <memory>
+#include <optional>
+#include <string>
 
 #include <TFile.h>
 #include <TTree.h>
@@ -59,15 +55,15 @@ class RootBFieldWriter {
     /// Number of bins in r
     /// @note setting this parameter is optional, in case no bin numbers are
     /// handed over the full magnetic field map will be printed out
-    size_t rBins = 200;
+    std::size_t rBins = 200;
     /// Number of bins in z
     // @note setting this parameter is optional, in case no bin numbers are
     /// handed over the full magnetic field map will be printed out
-    size_t zBins = 300;
+    std::size_t zBins = 300;
     /// Number of bins in phi
     // @note setting this parameter is optional, in case no bin numbers are
     /// handed over the full magnetic field map will be printed out
-    size_t phiBins = 100;
+    std::size_t phiBins = 100;
   };
 
   /// Write down an interpolated magnetic field map

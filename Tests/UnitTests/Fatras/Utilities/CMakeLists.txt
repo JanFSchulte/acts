@@ -1,3 +1,5 @@
-set(unittest_extra_libraries ActsFatras)
+set(unittest_extra_libraries Acts::Fatras)
 
-add_unittest(FatrasParticleData ParticleDataTests.cpp)
+add_unittest(
+        FatrasFpeSafeGammaDistribution FpeSafeGammaDistributionTests.cpp
+)

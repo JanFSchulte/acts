@@ -1,17 +1,19 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
 #include "Acts/Definitions/Units.hpp"
 #include "Acts/Tests/CommonHelpers/FloatComparisons.hpp"
 
+#include <cmath>
 #include <limits>
+#include <numbers>
 
 using namespace Acts::UnitLiterals;
 
@@ -62,10 +64,10 @@ BOOST_AUTO_TEST_CASE(Time) {
 }
 
 BOOST_AUTO_TEST_CASE(Angle) {
-  CHECK_CLOSE_REL(45_degree, M_PI / 4 * 1_rad, eps);
-  CHECK_CLOSE_REL(90_degree, M_PI / 2 * 1_rad, eps);
-  CHECK_CLOSE_REL(180_degree, M_PI * 1_rad, eps);
-  CHECK_CLOSE_REL(360_degree, 2 * M_PI * 1_rad, eps);
+  CHECK_CLOSE_REL(45_degree, std::numbers::pi / 4. * 1_rad, eps);
+  CHECK_CLOSE_REL(90_degree, std::numbers::pi / 2. * 1_rad, eps);
+  CHECK_CLOSE_REL(180_degree, std::numbers::pi * 1_rad, eps);
+  CHECK_CLOSE_REL(360_degree, 2 * std::numbers::pi * 1_rad, eps);
   CHECK_CLOSE_REL(1_mm / 1_m, 1_mrad, eps);
   CHECK_CLOSE_REL(1_um / 1_mm, 1_mrad, eps);
 }
@@ -108,10 +110,6 @@ BOOST_AUTO_TEST_CASE(DecayWidthTime) {
   CHECK_CLOSE_REL(hbar / 1.42_GeV, 4.635295432723526e-10_fs, 1e-7);
 }
 
-BOOST_AUTO_TEST_CASE(Charge) {
-  CHECK_CLOSE_REL(1_C, 6.241509074460763e18_e, eps);
-}
-
 BOOST_AUTO_TEST_CASE(MagneticField) {
   CHECK_CLOSE_REL(10_kGauss, 1_T, eps);
   CHECK_CLOSE_REL(1_kGauss, 1000_Gauss, eps);
@@ -127,10 +125,16 @@ BOOST_AUTO_TEST_CASE(MomentumRadius) {
 }
 
 BOOST_AUTO_TEST_CASE(PhysicalConstants) {
-  using namespace Acts::PhysicalConstants;
+  using Acts::PhysicalConstants::hbar;
   // see https://en.wikipedia.org/wiki/Planck_constant
-  CHECK_CLOSE_REL(hbar, 6.62607015e-34 * 1_J * 1_s / (2 * M_PI), 1e-6);
-  CHECK_CLOSE_REL(hbar, 4.135667696e-15 * 1_eV * 1_s / (2 * M_PI), 1e-7);
+  CHECK_CLOSE_REL(hbar, 6.62607015e-34 * 1_J * 1_s / (2 * std::numbers::pi),
+                  1e-6);
+  CHECK_CLOSE_REL(hbar, 4.135667696e-15 * 1_eV * 1_s / (2 * std::numbers::pi),
+                  1e-7);
+
+  using Acts::PhysicalConstants::c;
+  // we really want c to be 1
+  BOOST_CHECK_EQUAL(c, 1.0);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

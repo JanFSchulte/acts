@@ -1,23 +1,28 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
+
 // STL include(s)
-#include <cassert>
 #include <ctime>
-#include <exception>
-#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
+
+/// @defgroup Logging Logging
 
 // clang-format off
 /// @brief macro to use a local Acts::Logger object
@@ -45,7 +50,7 @@
 #define ACTS_LOCAL_LOGGER(log_object)                                          \
   struct __local_acts_logger                                                   \
   {                                                                            \
-    __local_acts_logger(std::unique_ptr<const ::Acts::Logger> logger):         \
+    explicit __local_acts_logger(std::unique_ptr<const ::Acts::Logger> logger):         \
       m_logger(std::move(logger))                                              \
     {}                                                                         \
                                                                                \
@@ -60,11 +65,14 @@
 
 // Debug level agnostic implementation of the ACTS_XYZ logging macros
 #define ACTS_LOG(level, x)                                                     \
-  if (logger().doPrint(level)) {                                               \
-    std::ostringstream os;                                                     \
-    os << x;                                                                   \
-    logger().log(level, os.str());                                             \
-  }
+  do {                                                                         \
+    if (logger().doPrint(level)) {                                             \
+      std::ostringstream os;                                                   \
+      os << x;                                                                 \
+      logger().log(level, os.str());                                           \
+    }                                                                          \
+  }                                                                            \
+  while(0)
 
 /// @brief macro for verbose debug output
 /// @ingroup Logging
@@ -229,6 +237,22 @@ class ThresholdFailure : public std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
+/// Helper class that changes the failure threshold for the duration of its
+/// lifetime.
+class ScopedFailureThreshold {
+ public:
+  explicit ScopedFailureThreshold(Level level) { setFailureThreshold(level); }
+  ScopedFailureThreshold(const ScopedFailureThreshold&) = delete;
+  ScopedFailureThreshold& operator=(const ScopedFailureThreshold&) = delete;
+  ScopedFailureThreshold(ScopedFailureThreshold&&) = delete;
+  ScopedFailureThreshold& operator=(ScopedFailureThreshold&&) = delete;
+
+  ~ScopedFailureThreshold() noexcept;
+
+ private:
+  Level m_previousLevel{getFailureThreshold()};
+};
+
 /// @brief abstract base class for printing debug output
 ///
 /// Implementations of this interface need to define how and where to @a print
@@ -243,6 +267,16 @@ class OutputPrintPolicy {
   /// @param [in] lvl   debug output level of message
   /// @param [in] input text of debug message
   virtual void flush(const Level& lvl, const std::string& input) = 0;
+
+  /// Return the name of the print policy
+  /// @return the name
+  virtual const std::string& name() const = 0;
+
+  /// Make a copy of this print policy with a new name
+  /// @param name the new name
+  /// @return the copy
+  virtual std::unique_ptr<OutputPrintPolicy> clone(
+      const std::string& name) const = 0;
 };
 
 /// @brief abstract base class for filtering debug output
@@ -261,6 +295,15 @@ class OutputFilterPolicy {
   /// @return @c true of debug message should be processed, @c false if debug
   ///         message should be skipped
   virtual bool doPrint(const Level& lvl) const = 0;
+
+  /// Get the level of this filter policy
+  /// @return the levele
+  virtual Level level() const = 0;
+
+  /// Make a copy of this filter policy with a new level
+  /// @param level the new level
+  /// @return the new copy
+  virtual std::unique_ptr<OutputFilterPolicy> clone(Level level) const = 0;
 };
 
 /// @brief default filter policy for debug messages
@@ -272,14 +315,14 @@ class DefaultFilterPolicy final : public OutputFilterPolicy {
   /// @brief constructor
   ///
   /// @param [in] lvl threshold debug level
-  explicit DefaultFilterPolicy(const Level& lvl) : m_level(lvl) {
+  explicit DefaultFilterPolicy(Level lvl) : m_level(lvl) {
     if (lvl > getFailureThreshold()) {
       throw ThresholdFailure(
           "Requested debug level is incompatible with "
           "the ACTS_LOG_FAILURE_THRESHOLD=" +
           std::string{levelName(getFailureThreshold())} +
           " configuration. See "
-          "https://acts.readthedocs.io/en/latest/core/"
+          "https://acts.readthedocs.io/en/latest/core/misc/"
           "logging.html#logging-thresholds");
     }
   }
@@ -293,6 +336,17 @@ class DefaultFilterPolicy final : public OutputFilterPolicy {
   ///
   /// @return @c true if @p lvl >= #m_level, otherwise @c false
   bool doPrint(const Level& lvl) const override { return m_level <= lvl; }
+
+  /// Get the level of this filter policy
+  /// @return the levele
+  Level level() const override { return m_level; }
+
+  /// Make a copy of this filter policy with a new level
+  /// @param level the new level
+  /// @return the new copy
+  std::unique_ptr<OutputFilterPolicy> clone(Level level) const override {
+    return std::make_unique<DefaultFilterPolicy>(level);
+  }
 
  private:
   /// threshold debug level for messages to be processed
@@ -324,7 +378,11 @@ class OutputDecorator : public OutputPrintPolicy {
     m_wrappee->flush(lvl, input);
   }
 
- private:
+  /// Return the name of the output decorator (forwards to wrappee)
+  /// @return the name
+  const std::string& name() const override { return m_wrappee->name(); }
+
+ protected:
   /// wrapped object for printing the debug message
   std::unique_ptr<OutputPrintPolicy> m_wrappee;
 };
@@ -359,6 +417,19 @@ class NamedOutputDecorator final : public OutputDecorator {
     OutputDecorator::flush(lvl, os.str());
   }
 
+  /// Make a copy of this print policy with a new name
+  /// @param name the new name
+  /// @return the copy
+  std::unique_ptr<OutputPrintPolicy> clone(
+      const std::string& name) const override {
+    return std::make_unique<NamedOutputDecorator>(m_wrappee->clone(name), name,
+                                                  m_maxWidth);
+  }
+
+  /// Get this named output decorators name
+  /// @return the name
+  const std::string& name() const override { return m_name; }
+
  private:
   /// name to be prepended
   std::string m_name;
@@ -376,8 +447,8 @@ class TimedOutputDecorator final : public OutputDecorator {
   ///
   /// @param [in] wrappee output print policy object to be wrapped
   /// @param [in] format  format of time stamp (see std::strftime)
-  TimedOutputDecorator(std::unique_ptr<OutputPrintPolicy> wrappee,
-                       const std::string& format = "%X")
+  explicit TimedOutputDecorator(std::unique_ptr<OutputPrintPolicy> wrappee,
+                                const std::string& format = "%X")
       : OutputDecorator(std::move(wrappee)), m_format(format) {}
 
   /// @brief flush the debug message to the destination stream
@@ -393,6 +464,15 @@ class TimedOutputDecorator final : public OutputDecorator {
     OutputDecorator::flush(lvl, os.str());
   }
 
+  /// Make a copy of this print policy with a new name
+  /// @param name the new name
+  /// @return the copy
+  std::unique_ptr<OutputPrintPolicy> clone(
+      const std::string& name) const override {
+    return std::make_unique<TimedOutputDecorator>(m_wrappee->clone(name),
+                                                  m_format);
+  }
+
  private:
   /// @brief get current time stamp
   ///
@@ -401,7 +481,9 @@ class TimedOutputDecorator final : public OutputDecorator {
     char buffer[20];
     time_t t{};
     std::time(&t);
-    std::strftime(buffer, sizeof(buffer), m_format.c_str(), localtime(&t));
+    struct tm tbuf {};
+    std::strftime(buffer, sizeof(buffer), m_format.c_str(),
+                  localtime_r(&t, &tbuf));
     return buffer;
   }
 
@@ -432,6 +514,14 @@ class ThreadOutputDecorator final : public OutputDecorator {
     os << std::left << std::setw(20) << std::this_thread::get_id() << input;
     OutputDecorator::flush(lvl, os.str());
   }
+
+  /// Make a copy of this print policy with a new name
+  /// @param name the new name
+  /// @return the copy
+  std::unique_ptr<OutputPrintPolicy> clone(
+      const std::string& name) const override {
+    return std::make_unique<ThreadOutputDecorator>(m_wrappee->clone(name));
+  }
 };
 
 /// @brief decorate debug message with its debug level
@@ -456,6 +546,14 @@ class LevelOutputDecorator final : public OutputDecorator {
     std::ostringstream os;
     os << std::left << std::setw(10) << toString(lvl) << input;
     OutputDecorator::flush(lvl, os.str());
+  }
+
+  /// Make a copy of this print policy with a new name
+  /// @param name the new name
+  /// @return the copy
+  std::unique_ptr<OutputPrintPolicy> clone(
+      const std::string& name) const override {
+    return std::make_unique<LevelOutputDecorator>(m_wrappee->clone(name));
   }
 
  private:
@@ -489,6 +587,15 @@ class DefaultPrintPolicy final : public OutputPrintPolicy {
   /// @param [in] lvl   debug level of debug message
   /// @param [in] input text of debug message
   void flush(const Level& lvl, const std::string& input) final {
+    // Mutex to serialize access to std::cout
+    static std::mutex s_stdoutMutex;
+    std::unique_lock lock{s_stdoutMutex,
+                          std::defer_lock};  // prep empty, we might not need it
+
+    if (m_out == &std::cout) {
+      lock.lock();  // lock only if we are printing to std::cout
+    }
+
     (*m_out) << input << std::endl;
     if (lvl >= getFailureThreshold()) {
       throw ThresholdFailure(
@@ -496,10 +603,29 @@ class DefaultPrintPolicy final : public OutputPrintPolicy {
           "ACTS_LOG_FAILURE_THRESHOLD=" +
           std::string{levelName(getFailureThreshold())} +
           " configuration, bailing out. See "
-          "https://acts.readthedocs.io/en/latest/core/"
+          "https://acts.readthedocs.io/en/latest/core/misc/"
           "logging.html#logging-thresholds");
     }
   }
+
+  /// Fulfill @c OutputPrintPolicy interface. This policy doesn't actually have a
+  /// name, so the assumption is that somewhere in the decorator hierarchy,
+  /// there is something that returns a name without delegating to a wrappee,
+  /// before reaching this overload.
+  /// @note This method will throw an exception
+  /// @return the name, but it never returns
+  const std::string& name() const override {
+    throw std::runtime_error{
+        "Default print policy doesn't have a name. Is there no named output in "
+        "the decorator chain?"};
+  };
+
+  /// Make a copy of this print policy with a new name
+  /// @return the copy
+  std::unique_ptr<OutputPrintPolicy> clone(
+      const std::string& /*name*/) const override {
+    return std::make_unique<DefaultPrintPolicy>(m_out);
+  };
 
  private:
   /// pointer to destination output stream
@@ -542,50 +668,65 @@ class Logger {
     }
   }
 
+  /// Return the print policy for this logger
+  /// @return the print policy
+  const Logging::OutputPrintPolicy& printPolicy() const {
+    return *m_printPolicy;
+  }
+
+  /// Return the filter policy for this logger
+  /// @return the filter policy
+  const Logging::OutputFilterPolicy& filterPolicy() const {
+    return *m_filterPolicy;
+  }
+
+  /// Return the level of the filter policy of this logger
+  /// @return the level
+  Logging::Level level() const { return m_filterPolicy->level(); }
+
+  /// Return the name of the print policy of this logger
+  /// @return the name
+  const std::string& name() const { return m_printPolicy->name(); }
+
+  /// Make a copy of this logger, optionally changing the name or the level
+  /// @param _name the optional new name
+  /// @param _level the optional new level
+  std::unique_ptr<Logger> clone(
+      const std::optional<std::string>& _name = std::nullopt,
+      const std::optional<Logging::Level>& _level = std::nullopt) const {
+    return std::make_unique<Logger>(
+        m_printPolicy->clone(_name.value_or(name())),
+        m_filterPolicy->clone(_level.value_or(level())));
+  }
+
+  /// Make a copy of the logger, with a new level. Convenience function for
+  /// if you only want to change the level but not the name.
+  /// @param _level the new level
+  /// @return the new logger
+  std::unique_ptr<Logger> clone(Logging::Level _level) const {
+    return clone(std::nullopt, _level);
+  }
+
+  /// Make a copy of the logger, with a suffix added to the end of it's
+  /// name. You can also optionally supply a new level
+  /// @param suffix the suffix to add to the end of the name
+  /// @param _level the optional new level
+  std::unique_ptr<Logger> cloneWithSuffix(
+      const std::string& suffix,
+      std::optional<Logging::Level> _level = std::nullopt) const {
+    return clone(name() + suffix, _level.value_or(level()));
+  }
+
+  /// Helper function so a logger reference can be used as is with the logging
+  /// macros
+  const Logger& operator()() const { return *this; }
+
  private:
   /// policy object for printing debug messages
   std::unique_ptr<Logging::OutputPrintPolicy> m_printPolicy;
 
   /// policy object for filtering debug messages
   std::unique_ptr<Logging::OutputFilterPolicy> m_filterPolicy;
-};
-
-/// @brief Class that contains (but doesn't own) a logger instance. Is callable
-/// so can be used with the logging macros.
-class LoggerWrapper {
- public:
-  LoggerWrapper() = delete;
-
-  /// @brief Constructor ensuring a logger instance is given
-  ///
-  /// @param logger
-  explicit LoggerWrapper(const Logger& logger);
-
-  /// Directly expose whether the contained logger will print at a level.
-  ///
-  /// @param lvl The level to check
-  /// @return Whether to print at this level or not.
-  bool doPrint(const Logging::Level& lvl) const {
-    assert(m_logger != nullptr);
-    return m_logger->doPrint(lvl);
-  }
-
-  /// Add a logging message at a given level
-  /// @param lvl The level to print at
-  /// @param input text of debug message
-  void log(const Logging::Level& lvl, const std::string& input) const;
-
-  /// Call operator that returns the contained logger instance.
-  /// Enables using the logging macros `ACTS_*` when an instance of this class
-  /// is assigned to a local variable `logger`.
-  /// @return Reference to the logger instance.
-  const Logger& operator()() const {
-    assert(m_logger != nullptr);
-    return *m_logger;
-  }
-
- private:
-  const Logger* m_logger;
 };
 
 /// @brief get default debug output logger
@@ -605,6 +746,6 @@ std::unique_ptr<const Logger> getDefaultLogger(
     const std::string& name, const Logging::Level& lvl,
     std::ostream* log_stream = &std::cout);
 
-LoggerWrapper getDummyLogger();
+const Logger& getDummyLogger();
 
 }  // namespace Acts

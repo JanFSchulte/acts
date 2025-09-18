@@ -1,31 +1,51 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2017-2018 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+#pragma GCC diagnostic push
+#if __GNUC__ == 15
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
 #include <boost/test/data/test_case.hpp>
+#pragma GCC diagnostic pop
 #include <boost/test/unit_test.hpp>
 
-#include "Acts/Definitions/Algebra.hpp"
 #include "Acts/Geometry/CylinderVolumeBuilder.hpp"
 
+#include <utility>
+
 namespace bdata = boost::unit_test::data;
-namespace tt = boost::test_tools;
 
-namespace Acts {
-
-namespace Test {
+namespace Acts::Test {
+//
 
 /// Unit test for testing the wraps() function of the CylinderVolumeBuilder
-BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_wraps,
-                     bdata::random(-11., -15.) ^ bdata::random(11., 15.) ^
-                         bdata::random(-10., 10.) ^ bdata::random(0., 4.) ^
-                         bdata::random(11., 15.) ^ bdata::random(10., 15.) ^
-                         bdata::xrange(100),
-                     left, right, central, inner, outer, length, index) {
+BOOST_DATA_TEST_CASE(
+    CylinderVolumeBuilder_wraps,
+    bdata::random((bdata::engine = std::mt19937(), bdata::seed = 1,
+                   bdata::distribution =
+                       std::uniform_real_distribution<double>(-15., -11.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 2,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(11., 15.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 3,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(-10., 10.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 4,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(0., 4.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 5,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(11., 15.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 6,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(10., 15.))) ^
+        bdata::xrange(100),
+    left, right, central, inner, outer, length, index) {
   (void)index;
   // inner volume
   VolumeConfig innerConfig;
@@ -86,7 +106,7 @@ BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_wraps,
   BOOST_CHECK(!outerConfig4.wraps(innerConfig));
   // check if outside volume can not be wrapped around inside volume
   BOOST_CHECK(!innerConfig.wraps(outerConfig3));
-  // check if outside volume containes inside volume
+  // check if outside volume contains inside volume
   BOOST_CHECK(outerConfig5.wraps(innerConfig));
   // check if inside volume is not contained by outside volume
   BOOST_CHECK(!innerConfig.wraps(outerConfig5));
@@ -96,12 +116,28 @@ BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_wraps,
 
 /// Unit test for testing the contains(), containsInR() and containsInZ()
 /// function of the CylinderVolumeBuilder
-BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_containes,
-                     bdata::random(-11., -15.) ^ bdata::random(11., 15.) ^
-                         bdata::random(-10., 10.) ^ bdata::random(0., 4.) ^
-                         bdata::random(10., 15.) ^ bdata::random(10., 15.) ^
-                         bdata::xrange(100),
-                     left, right, central, inner, outer, length, index) {
+BOOST_DATA_TEST_CASE(
+    CylinderVolumeBuilder_containes,
+    bdata::random((bdata::engine = std::mt19937(), bdata::seed = 1,
+                   bdata::distribution =
+                       std::uniform_real_distribution<double>(-15., -11.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 2,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(11., 15.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 3,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(-10., 10.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 4,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(0., 4.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 5,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(10., 15.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 6,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(10., 15.))) ^
+        bdata::xrange(100),
+    left, right, central, inner, outer, length, index) {
   (void)index;
   // inner volume
   VolumeConfig innerConfig;
@@ -167,7 +203,7 @@ BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_containes,
   BOOST_CHECK(!outerConfig4.contains(innerConfig));
   // check if outside volume can not be wrapped around inside volume
   BOOST_CHECK(!innerConfig.contains(outerConfig3));
-  // check if outside volume containes inside volume
+  // check if outside volume contains inside volume
   BOOST_CHECK(outerConfig5.contains(innerConfig));
   // check if inside volume is not contained by outside volume
   BOOST_CHECK(!innerConfig.contains(outerConfig5));
@@ -183,10 +219,16 @@ BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_containes,
 
 /// Unit test for testing the coverlapsInR()
 /// function of the CylinderVolumeBuilder
-BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_overlapsInR,
-                     bdata::random(0., 4.) ^ bdata::random(11., 15.) ^
-                         bdata::xrange(100),
-                     inner, outer, index) {
+BOOST_DATA_TEST_CASE(
+    CylinderVolumeBuilder_overlapsInR,
+    bdata::random((
+        bdata::engine = std::mt19937(), bdata::seed = 1,
+        bdata::distribution = std::uniform_real_distribution<double>(0., 4.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 2,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(11., 15.))) ^
+        bdata::xrange(100),
+    inner, outer, index) {
   (void)index;
   // reference volume
   VolumeConfig Config0;
@@ -245,10 +287,19 @@ BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_overlapsInR,
 
 /// Unit test for testing the coverlapsInZ()
 /// function of the CylinderVolumeBuilder
-BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_overlapsInZ,
-                     bdata::random(-11., -15.) ^ bdata::random(11., 15.) ^
-                         bdata::random(0., 4.) ^ bdata::xrange(100),
-                     left, right, inner, index) {
+BOOST_DATA_TEST_CASE(
+    CylinderVolumeBuilder_overlapsInZ,
+    bdata::random((bdata::engine = std::mt19937(), bdata::seed = 1,
+                   bdata::distribution =
+                       std::uniform_real_distribution<double>(-15., -11.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 2,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(11., 15.))) ^
+        bdata::random((bdata::engine = std::mt19937(), bdata::seed = 3,
+                       bdata::distribution =
+                           std::uniform_real_distribution<double>(0., 4.))) ^
+        bdata::xrange(100),
+    left, right, inner, index) {
   (void)index;
   // inner volume
   VolumeConfig Config0;
@@ -321,6 +372,4 @@ BOOST_DATA_TEST_CASE(CylinderVolumeBuilder_overlapsInZ,
   BOOST_CHECK(Config0.overlapsInZ(Config7));
 }
 
-}  // namespace Test
-
-}  // namespace Acts
+}  // namespace Acts::Test

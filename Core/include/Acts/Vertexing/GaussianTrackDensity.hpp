@@ -1,14 +1,15 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
 #include "Acts/EventData/TrackParameters.hpp"
+#include "Acts/Vertexing/TrackAtVertex.hpp"
 
 #include <map>
 #include <set>
@@ -20,7 +21,6 @@ namespace Acts {
 /// @brief Class to model tracks as 2D density functions based on
 /// their d0 and z0 perigee parameters (mean value) and covariance
 /// matrices (determining the width of the function)
-template <typename input_track_t>
 class GaussianTrackDensity {
  public:
   /// @brief Struct to store information for a single track
@@ -59,7 +59,7 @@ class GaussianTrackDensity {
 
   /// @brief The Config struct
   struct Config {
-    Config(double d0Sig = 3.5, double z0Sig = 12.)
+    explicit Config(double d0Sig = 3.5, double z0Sig = 12.)
         : d0MaxSignificance(d0Sig),
           z0MaxSignificance(z0Sig),
           d0SignificanceCut(d0Sig * d0Sig),
@@ -73,24 +73,30 @@ class GaussianTrackDensity {
     double d0MaxSignificance;
     // Maximum z0 impact parameter significance to use a track
     double z0MaxSignificance;
-    // Correspondig cut values
+    // Corresponding cut values
     double d0SignificanceCut;
     double z0SignificanceCut;
+
+    // Function to extract parameters from InputTrack
+    InputTrack::Extractor extractParameters;
   };
 
   /// @brief The State struct
   struct State {
     // Constructor with size track map
-    State(unsigned int nTracks) { trackEntries.reserve(nTracks); }
+    explicit State(unsigned int nTracks) { trackEntries.reserve(nTracks); }
     // Vector to cache track information
     std::vector<TrackEntry> trackEntries;
   };
 
-  /// Default constructor
-  GaussianTrackDensity() = default;
-
   /// Constructor with config
-  GaussianTrackDensity(const Config& cfg) : m_cfg(cfg) {}
+  explicit GaussianTrackDensity(const Config& cfg) : m_cfg(cfg) {
+    if (!m_cfg.extractParameters.connected()) {
+      throw std::invalid_argument(
+          "GaussianTrackDensity: "
+          "No parameter extractor provided.");
+    }
+  }
 
   /// @brief Calculates z position of global maximum with Gaussian width
   /// for density function.
@@ -107,27 +113,19 @@ class GaussianTrackDensity {
   ///
   /// @param state The track density state
   /// @param trackList All input tracks
-  /// @param extractParameters Function extracting BoundTrackParameters from
-  /// InputTrack
   ///
   /// @return Pair of position of global maximum and Gaussian width
-  std::pair<double, double> globalMaximumWithWidth(
-      State& state, const std::vector<const input_track_t*>& trackList,
-      const std::function<BoundTrackParameters(input_track_t)>&
-          extractParameters) const;
+  Result<std::optional<std::pair<double, double>>> globalMaximumWithWidth(
+      State& state, const std::vector<InputTrack>& trackList) const;
 
   /// @brief Calculates the z position of the global maximum
   ///
   /// @param state The track density state
   /// @param trackList All input tracks
-  /// @param extractParameters Function extracting BoundTrackParameters from
-  /// InputTrack
   ///
   /// @return z position of the global maximum
-  double globalMaximum(State& state,
-                       const std::vector<const input_track_t*>& trackList,
-                       const std::function<BoundTrackParameters(input_track_t)>&
-                           extractParameters) const;
+  Result<std::optional<double>> globalMaximum(
+      State& state, const std::vector<InputTrack>& trackList) const;
 
  private:
   /// The configuration
@@ -137,12 +135,8 @@ class GaussianTrackDensity {
   ///
   /// @param state The track density state
   /// @param trackList All input tracks
-  /// @param extractParameters Function extracting BoundTrackParameters from
-  /// InputTrack
-  Result<void> addTracks(
-      State& state, const std::vector<const input_track_t*>& trackList,
-      const std::function<BoundTrackParameters(input_track_t)>&
-          extractParameters) const;
+  Result<void> addTracks(State& state,
+                         const std::vector<InputTrack>& trackList) const;
 
   /// @brief Evaluate the density function and its two first
   /// derivatives at the specified coordinate along the beamline
@@ -181,7 +175,8 @@ class GaussianTrackDensity {
   class GaussianTrackDensityStore {
    public:
     // Initialise at the z coordinate at which the density is to be evaluated
-    GaussianTrackDensityStore(double z_coordinate) : m_z(z_coordinate) {}
+    explicit GaussianTrackDensityStore(double z_coordinate)
+        : m_z(z_coordinate) {}
 
     // Add the contribution of a single track to the density
     void addTrackToDensity(const TrackEntry& entry);
@@ -201,5 +196,3 @@ class GaussianTrackDensity {
 };
 
 }  // namespace Acts
-
-#include "Acts/Vertexing/GaussianTrackDensity.ipp"

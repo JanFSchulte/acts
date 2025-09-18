@@ -1,13 +1,18 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsFatras/Digitization/PlanarSurfaceMask.hpp"
 
+#include "Acts/Definitions/Tolerance.hpp"
+#include "Acts/Definitions/TrackParametrization.hpp"
+#include "Acts/Surfaces/BoundaryTolerance.hpp"
+#include "Acts/Surfaces/SurfaceBounds.hpp"
+#include "Acts/Utilities/Intersection.hpp"
 #include "ActsFatras/Digitization/DigitizationError.hpp"
 #include <Acts/Surfaces/AnnulusBounds.hpp>
 #include <Acts/Surfaces/DiscTrapezoidBounds.hpp>
@@ -16,49 +21,55 @@
 #include <Acts/Surfaces/Surface.hpp>
 #include <Acts/Utilities/Helpers.hpp>
 
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <memory>
+#include <numbers>
+
 namespace {
 
-/// Helper method to check if an interseciton is good.
+/// Helper method to check if an intersection is good.
 ///
 /// Good in this context is defined as: along direction,
 /// closer than the segment length & reachable
 ///
-/// @param intersections The confimed intersections for the segment
+/// @param intersections The confirmed intersections for the segment
 /// @param candidate The candidate intersection
 /// @param sLength The segment length, maximal allowed length
 void checkIntersection(std::vector<Acts::Intersection2D>& intersections,
                        const Acts::Intersection2D& candidate, double sLength) {
-  if (candidate and candidate.pathLength > 0 and
-      candidate.pathLength < sLength) {
+  if (candidate.isValid() && candidate.pathLength() > 0 &&
+      candidate.pathLength() < sLength) {
     intersections.push_back(candidate);
   }
 }
 
 /// Helper method to apply the mask and return.
 ///
-/// If two (or more) intersections would be good, appply the first two
+/// If two (or more) intersections would be good, apply the first two
 /// If only one is available, the boolean tells you which one it is.
 /// If no intersection is valid, return an error code for masking.
 ///
 /// @param intersections All confirmed intersections
 /// @param segment The original segment before masking
-/// @param firstInside Indicator if the first is inisde or not
+/// @param firstInside Indicator if the first is inside or not
 ///
 /// @return a new Segment (clipped) wrapped in a result or error_code
 Acts::Result<ActsFatras::PlanarSurfaceMask::Segment2D> maskAndReturn(
     std::vector<Acts::Intersection2D>& intersections,
     const ActsFatras::PlanarSurfaceMask::Segment2D& segment, bool firstInside) {
-  std::sort(intersections.begin(), intersections.end());
+  std::ranges::sort(intersections, Acts::Intersection2D::pathLengthOrder);
   if (intersections.size() >= 2) {
-    return ActsFatras::PlanarSurfaceMask::Segment2D{intersections[0].position,
-                                                    intersections[1].position};
+    return ActsFatras::PlanarSurfaceMask::Segment2D{
+        intersections[0].position(), intersections[1].position()};
   } else if (intersections.size() == 1) {
-    return (not firstInside
+    return (!firstInside
                 ? ActsFatras::PlanarSurfaceMask::Segment2D{intersections[0]
-                                                               .position,
+                                                               .position(),
                                                            segment[1]}
                 : ActsFatras::PlanarSurfaceMask::Segment2D{
-                      segment[0], intersections[0].position});
+                      segment[0], intersections[0].position()});
   }
   return ActsFatras::DigitizationError::MaskingError;
 }
@@ -72,7 +83,7 @@ ActsFatras::PlanarSurfaceMask::apply(const Acts::Surface& surface,
   Segment2D clipped(segment);
 
   // Plane surface section -------------------
-  if (surfaceType == Acts::Surface::Plane or
+  if (surfaceType == Acts::Surface::Plane ||
       surface.bounds().type() == Acts::SurfaceBounds::eDiscTrapezoid) {
     Acts::Vector2 localStart =
         (surfaceType == Acts::Surface::Plane)
@@ -86,11 +97,13 @@ ActsFatras::PlanarSurfaceMask::apply(const Acts::Surface& surface,
             : Acts::Vector2(Acts::VectorHelpers::perp(segment[1]),
                             Acts::VectorHelpers::phi(segment[1]));
 
-    bool startInside = surface.bounds().inside(localStart, true);
-    bool endInside = surface.bounds().inside(localEnd, true);
+    bool startInside =
+        surface.bounds().inside(localStart, Acts::BoundaryTolerance::None());
+    bool endInside =
+        surface.bounds().inside(localEnd, Acts::BoundaryTolerance::None());
 
     // Fast exit, both inside
-    if (startInside and endInside) {
+    if (startInside && endInside) {
       return segment;
     }
 
@@ -119,11 +132,13 @@ ActsFatras::PlanarSurfaceMask::apply(const Acts::Surface& surface,
     Acts::Vector2 ePolar(Acts::VectorHelpers::perp(segment[1]),
                          Acts::VectorHelpers::phi(segment[1]));
 
-    bool startInside = surface.bounds().inside(sPolar, true);
-    bool endInside = surface.bounds().inside(ePolar, true);
+    bool startInside =
+        surface.bounds().inside(sPolar, Acts::BoundaryTolerance::None());
+    bool endInside =
+        surface.bounds().inside(ePolar, Acts::BoundaryTolerance::None());
 
     // Fast exit for both inside
-    if (startInside and endInside) {
+    if (startInside && endInside) {
       return segment;
     }
 
@@ -151,7 +166,7 @@ ActsFatras::PlanarSurfaceMask::polygonMask(
   Acts::Vector2 sDir = sVector.normalized();
   double sLength = sVector.norm();
 
-  for (size_t iv = 0; iv < vertices.size(); ++iv) {
+  for (std::size_t iv = 0; iv < vertices.size(); ++iv) {
     const Acts::Vector2& s0 = vertices[iv];
     const Acts::Vector2& s1 =
         (iv + 1) < vertices.size() ? vertices[iv + 1] : vertices[0];
@@ -203,21 +218,21 @@ ActsFatras::PlanarSurfaceMask::radialMask(const Acts::RadialBounds& rBounds,
   };
 
   // Intersect phi lines
-  if ((M_PI - hPhi) > Acts::s_epsilon) {
-    if (sPhi < phii[0] or ePhi < phii[0]) {
+  if ((std::numbers::pi - hPhi) > Acts::s_epsilon) {
+    if (sPhi < phii[0] || ePhi < phii[0]) {
       intersectPhiLine(phii[0]);
     }
-    if (sPhi > phii[1] or ePhi > phii[1]) {
+    if (sPhi > phii[1] || ePhi > phii[1]) {
       intersectPhiLine(phii[1]);
     }
     // Intersect radial segments
-    if (sR < radii[0] or eR < radii[0]) {
+    if (sR < radii[0] || eR < radii[0]) {
       checkIntersection(intersections,
                         intersector.intersectCircleSegment(
                             radii[0], phii[0], phii[1], segment[0], sDir),
                         sLength);
     }
-    if (sR > radii[1] or eR > radii[1]) {
+    if (sR > radii[1] || eR > radii[1]) {
       checkIntersection(intersections,
                         intersector.intersectCircleSegment(
                             radii[1], phii[0], phii[1], segment[0], sDir),
@@ -226,10 +241,10 @@ ActsFatras::PlanarSurfaceMask::radialMask(const Acts::RadialBounds& rBounds,
   } else {
     // Full radial set
     // Intersect radial segments
-    if (sR < radii[0] or eR < radii[0]) {
+    if (sR < radii[0] || eR < radii[0]) {
       intersectCircle(radii[0]);
     }
-    if (sR > radii[1] or eR > radii[1]) {
+    if (sR > radii[1] || eR > radii[1]) {
       intersectCircle(radii[1]);
     }
   }
@@ -267,9 +282,12 @@ ActsFatras::PlanarSurfaceMask::annulusMask(const Acts::AnnulusBounds& aBounds,
         Acts::VectorHelpers::phi(vertices[phii[iarc * 2]] - moduleOrigin),
         Acts::VectorHelpers::phi(vertices[phii[iarc * 2 + 1]] - moduleOrigin),
         segment[0] - moduleOrigin, sDir);
-    if (intersection) {
-      intersection.position += moduleOrigin;
-      checkIntersection(intersections, intersection, sLength);
+    if (intersection.isValid()) {
+      checkIntersection(intersections,
+                        Acts::Intersection2D(
+                            intersection.position() + moduleOrigin,
+                            intersection.pathLength(), intersection.status()),
+                        sLength);
     }
   }
   return maskAndReturn(intersections, segment, firstInside);

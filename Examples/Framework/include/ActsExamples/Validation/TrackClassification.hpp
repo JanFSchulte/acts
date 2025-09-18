@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2019-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -14,15 +14,15 @@
 #include "ActsFatras/EventData/Barcode.hpp"
 
 #include <cstddef>
-#include <utility>
 #include <vector>
 
 namespace ActsExamples {
+struct Trajectories;
 
 /// Associate a particle to its hit count within a proto track.
 struct ParticleHitCount {
   ActsFatras::Barcode particleId;
-  size_t hitCount;
+  std::size_t hitCount;
 };
 
 /// Identify all particles that contribute to the proto track.
@@ -53,7 +53,12 @@ void identifyContributingParticles(
 /// information.
 void identifyContributingParticles(
     const IndexMultimap<ActsFatras::Barcode>& hitParticlesMap,
-    const Trajectories& trajectories, size_t trajectoryTip,
+    const Trajectories& trajectories, std::size_t trajectoryTip,
+    std::vector<ParticleHitCount>& particleHitCounts);
+
+void identifyContributingParticles(
+    const IndexMultimap<ActsFatras::Barcode>& hitParticlesMap,
+    const ConstTrackContainer::ConstTrackProxy& track,
     std::vector<ParticleHitCount>& particleHitCounts);
 
 }  // namespace ActsExamples

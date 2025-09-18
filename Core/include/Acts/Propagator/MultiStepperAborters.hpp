@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2021 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -13,10 +13,7 @@
 
 namespace Acts {
 
-/// This
-struct MultiStepperSurfaceReached {
-  MultiStepperSurfaceReached() = default;
-
+struct MultiStepperSurfaceReached : public ForcedSurfaceReached {
   /// If this is set, we are also happy if the mean of the components is on the
   /// surface. How the averaging is performed depends on the stepper
   /// implementation
@@ -27,66 +24,79 @@ struct MultiStepperSurfaceReached {
   /// false
   double averageOnSurfaceTolerance = 0.2;
 
+  MultiStepperSurfaceReached() = default;
+
   /// boolean operator for abort condition without using the result
   ///
   /// @tparam propagator_state_t Type of the propagator state
   /// @tparam stepper_t Type of the stepper
+  /// @tparam navigator_t Type of the navigator
   ///
   /// @param [in,out] state The propagation state object
   /// @param [in] stepper Stepper used for propagation
-  template <typename propagator_state_t, typename stepper_t>
-  bool operator()(propagator_state_t& state, const stepper_t& stepper) const {
-    return (*this)(state, stepper, *state.navigation.targetSurface);
-  }
-
-  /// boolean operator for abort condition without using the result
-  ///
-  /// @tparam propagator_state_t Type of the propagator state
-  /// @tparam stepper_t Type of the stepper
-  ///
-  /// @param [in,out] state The propagation state object
-  /// @param [in] stepper Stepper used for the progation
-  /// @param [in] targetSurface The target surface
-  template <typename propagator_state_t, typename stepper_t>
-  bool operator()(propagator_state_t& state, const stepper_t& stepper,
-                  const Surface& targetSurface) const {
-    const auto& logger = state.options.logger;
-    bool reached = true;
-    const auto oldCurrentSurface = state.navigation.currentSurface;
-
-    for (auto cmp : stepper.componentIterable(state.stepping)) {
-      auto singleState = cmp.singleState(state);
-      const auto& singleStepper = cmp.singleStepper(stepper);
-
-      if (!SurfaceReached{}(singleState, singleStepper, targetSurface)) {
-        reached = false;
-      }
+  /// @param [in] navigator Navigator used for the propagation
+  /// @param logger a logger instance
+  template <typename propagator_state_t, typename stepper_t,
+            typename navigator_t>
+  bool checkAbort(propagator_state_t& state, const stepper_t& stepper,
+                  const navigator_t& navigator, const Logger& logger) const {
+    if (surface == nullptr) {
+      ACTS_VERBOSE(
+          "MultiStepperSurfaceReached aborter | "
+          "No target surface set.");
+      return false;
     }
 
     // However, if mean of all is on surface, we are happy as well
     if (averageOnSurface) {
-      const auto sIntersection = targetSurface.intersect(
-          state.geoContext, stepper.position(state.stepping),
-          state.stepping.navDir * stepper.direction(state.stepping), true);
+      const auto sIntersection =
+          surface
+              ->intersect(
+                  state.geoContext, stepper.position(state.stepping),
+                  state.options.direction * stepper.direction(state.stepping),
+                  BoundaryTolerance(boundaryTolerance),
+                  averageOnSurfaceTolerance)
+              .closest();
 
-      if (sIntersection.intersection.status ==
-              Intersection3D::Status::onSurface or
-          sIntersection.intersection.pathLength < averageOnSurfaceTolerance) {
-        ACTS_VERBOSE("Reached target in average mode");
-        state.navigation.currentSurface = &targetSurface;
-        state.navigation.targetReached = true;
+      if (sIntersection.status() == IntersectionStatus::onSurface) {
+        ACTS_VERBOSE(
+            "MultiStepperSurfaceReached aborter | "
+            "Reached target in average mode");
+        for (auto cmp : stepper.componentIterable(state.stepping)) {
+          cmp.status() = IntersectionStatus::onSurface;
+        }
+
         return true;
+      }
+
+      ACTS_VERBOSE(
+          "MultiStepperSurfaceReached aborter | Average distance to target: "
+          << sIntersection.pathLength());
+    }
+
+    bool reached = true;
+
+    for (auto cmp : stepper.componentIterable(state.stepping)) {
+      // note that this is not copying anything heavy
+      auto singleState = cmp.singleState(state);
+      const auto& singleStepper = cmp.singleStepper(stepper);
+
+      if (!ForcedSurfaceReached::checkAbort(singleState, singleStepper,
+                                            navigator, logger)) {
+        reached = false;
+      } else {
+        cmp.status() = Acts::IntersectionStatus::onSurface;
       }
     }
 
-    // These values are changed by the single component aborters but must be
-    // reset if not all components are on the target
-    if (!reached) {
-      state.navigation.currentSurface = oldCurrentSurface;
-      state.navigation.targetReached = false;
+    if (reached) {
+      ACTS_VERBOSE(
+          "MultiStepperSurfaceReached aborter | "
+          "Reached target in single component mode");
     }
 
     return reached;
   }
 };
+
 }  // namespace Acts

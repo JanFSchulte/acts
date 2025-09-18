@@ -1,28 +1,27 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
-#include "Acts/Seeding/InternalSeed.hpp"
-#include "Acts/Seeding/InternalSpacePoint.hpp"
+#include "Acts/EventData/SpacePointMutableData.hpp"
+#include "Acts/Seeding/SeedFilter.hpp"
 #include "Acts/Seeding/SeedFinderConfig.hpp"
 #include "Acts/Seeding/SeedFinderOrthogonalConfig.hpp"
+#include "Acts/Utilities/KDTree.hpp"
+#include "Acts/Utilities/Logger.hpp"
 
 #include <array>
-#include <list>
-#include <map>
 #include <memory>
-#include <set>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace Acts {
+
 template <typename external_spacepoint_t>
 class SeedFinderOrthogonal {
  public:
@@ -39,41 +38,38 @@ class SeedFinderOrthogonal {
   using seed_t = Seed<external_spacepoint_t>;
 
   /**
-   * @brief The spacepoint type used by this seeder internally.
-   */
-  using internal_sp_t = InternalSpacePoint<external_spacepoint_t>;
-
-  /**
    * @brief The k-d tree type used by this seeder internally, which is
    * three-dimensional, contains internal spacepoint pointers, uses the Acts
    * scalar type for coordinates, stores its coordinates in std::arrays, and
    * has leaf size 4.
    */
-  using tree_t = KDTree<NDims, internal_sp_t *, ActsScalar, std::array, 4>;
+  using tree_t =
+      KDTree<NDims, const external_spacepoint_t *, double, std::array, 4>;
 
   /**
    * @brief Construct a new orthogonal seed finder.
    *
    * @param config The configuration parameters for this seed finder.
-   * @param options frequently changing configuration (like beam position)
+   * @param logger The ACTS logger.
    */
-  SeedFinderOrthogonal(
+  explicit SeedFinderOrthogonal(
       const Acts::SeedFinderOrthogonalConfig<external_spacepoint_t> &config,
-      const Acts::SeedFinderOptions &options);
-
+      std::unique_ptr<const Acts::Logger> logger =
+          Acts::getDefaultLogger("Finder", Logging::Level::INFO));
   /**
    * @brief Destroy the orthogonal seed finder object.
    */
   ~SeedFinderOrthogonal() = default;
 
-  /*
-   * Disallow various kinds of constructors, copies, and assignments.
-   */
-  SeedFinderOrthogonal() = delete;
+  SeedFinderOrthogonal() = default;
   SeedFinderOrthogonal(const SeedFinderOrthogonal<external_spacepoint_t> &) =
       delete;
   SeedFinderOrthogonal<external_spacepoint_t> &operator=(
       const SeedFinderOrthogonal<external_spacepoint_t> &) = delete;
+  SeedFinderOrthogonal(
+      SeedFinderOrthogonal<external_spacepoint_t> &&) noexcept = default;
+  SeedFinderOrthogonal<external_spacepoint_t> &operator=(
+      SeedFinderOrthogonal<external_spacepoint_t> &&) noexcept = default;
 
   /**
    * @brief Perform seed finding, appending seeds to a container.
@@ -98,11 +94,14 @@ class SeedFinderOrthogonal {
    * @tparam input_container_t The type of the input spacepoint container.
    * @tparam output_container_t The type of the output seed container.
    *
+   * @param options frequently changing configuration (like beam position)
    * @param spacePoints The input spacepoints from which to create seeds.
    * @param out_cont The output container to write seeds to.
+   * covariance of the external space point
    */
   template <typename input_container_t, typename output_container_t>
-  void createSeeds(const input_container_t &spacePoints,
+  void createSeeds(const Acts::SeedFinderOptions &options,
+                   const input_container_t &spacePoints,
                    output_container_t &out_cont) const;
 
   /**
@@ -114,13 +113,15 @@ class SeedFinderOrthogonal {
    * about the seeding algorithm, please see that function.
    *
    * @tparam input_container_t The type of the input spacepoint container.
-   *
+   * @param options frequently changing configuration (like beam position)
    * @param spacePoints The input spacepoints from which to create seeds.
+   * covariance of the external space point
    *
    * @return A vector of seeds.
    */
   template <typename input_container_t>
-  std::vector<seed_t> createSeeds(const input_container_t &spacePoints) const;
+  std::vector<seed_t> createSeeds(const Acts::SeedFinderOptions &options,
+                                  const input_container_t &spacePoints) const;
 
  private:
   /**
@@ -143,7 +144,7 @@ class SeedFinderOrthogonal {
    * @return An N-dimensional axis-aligned search range.
    */
   typename tree_t::range_t validTupleOrthoRangeLH(
-      const internal_sp_t &low) const;
+      const external_spacepoint_t &low) const;
 
   /**
    * @brief Return the AABB rearch range for a given spacepoint, searching
@@ -160,7 +161,7 @@ class SeedFinderOrthogonal {
    * @return An N-dimensional axis-aligned search range.
    */
   typename tree_t::range_t validTupleOrthoRangeHL(
-      const internal_sp_t &high) const;
+      const external_spacepoint_t &high) const;
 
   /**
    * @brief Check whether two spacepoints form a valid tuple.
@@ -173,12 +174,17 @@ class SeedFinderOrthogonal {
    * pairs of points that were not generated using a constrained spatial search
    * strategy.
    *
+   * @param options frequently changing configuration (like beam position)
    * @param low The lower spacepoint.
    * @param high The upper spacepoint.
+   * @param isMiddleInverted If middle spacepoint is in the negative z region
    *
    * @return True if the two points form a valid pair, false otherwise.
    */
-  bool validTuple(const internal_sp_t &low, const internal_sp_t &high) const;
+  bool validTuple(const SeedFinderOptions &options,
+                  const external_spacepoint_t &low,
+                  const external_spacepoint_t &high,
+                  bool isMiddleInverted) const;
 
   /**
    * @brief Create a k-d tree from a set of spacepoints.
@@ -187,30 +193,37 @@ class SeedFinderOrthogonal {
    *
    * @return A k-d tree containing the given spacepoints.
    */
-  tree_t createTree(const std::vector<internal_sp_t *> &spacePoints) const;
+  tree_t createTree(
+      const std::vector<const external_spacepoint_t *> &spacePoints) const;
 
   /**
    * @brief Filter potential candidate pairs, and output seeds into an
    * iterator.
    *
-   * @tparam output_container_t The type of the output container.
-   *
+   * @param options frequently changing configuration (like beam position)
+   * @param mutableData Container for mutable variables used in the seeding
    * @param middle The (singular) middle spacepoint.
    * @param bottom The (vector of) candidate bottom spacepoints.
    * @param top The (vector of) candidate top spacepoints.
    * @param seedFilterState  holds quantities used in seed filter
-   * @param cont The container to write the resulting seeds to.
+   * @param candidates_collector The container to write the resulting
+   * seed candidates to.
    */
-  template <typename output_container_t>
-  void filterCandidates(internal_sp_t &middle,
-                        std::vector<internal_sp_t *> &bottom,
-                        std::vector<internal_sp_t *> &top,
-                        SeedFilterState seedFilterState,
-                        output_container_t &cont) const;
+  void filterCandidates(
+      const SeedFinderOptions &options,
+      Acts::SpacePointMutableData &mutableData,
+      const external_spacepoint_t &middle,
+      const std::vector<const external_spacepoint_t *> &bottom,
+      const std::vector<const external_spacepoint_t *> &top,
+      SeedFilterState seedFilterState,
+      CandidatesForMiddleSp<const external_spacepoint_t> &candidates_collector)
+      const;
 
   /**
    * @brief Search for seeds starting from a given middle space point.
    *
+   * @param options frequently changing configuration (like beam position)
+   * @param mutableData Container for mutable variables used in the seeding
    * @tparam NDims Number of dimensions for our spatial embedding (probably 3).
    * @tparam output_container_t Type of the output container.
    *
@@ -219,14 +232,25 @@ class SeedFinderOrthogonal {
    * @param middle_p The middle spacepoint to find seeds for.
    */
   template <typename output_container_t>
-  void processFromMiddleSP(const tree_t &tree, output_container_t &out_cont,
+  void processFromMiddleSP(const SeedFinderOptions &options,
+                           Acts::SpacePointMutableData &mutableData,
+                           const tree_t &tree, output_container_t &out_cont,
                            const typename tree_t::pair_t &middle_p) const;
 
   /**
    * @brief The configuration for the seeding algorithm.
    */
   Acts::SeedFinderOrthogonalConfig<external_spacepoint_t> m_config;
-  Acts::SeedFinderOptions m_options;
+
+  /**
+   * @brief Get the logger.
+   */
+  const Logger &logger() const { return *m_logger; }
+
+  /**
+   * @brief The logger
+   */
+  std::unique_ptr<const Acts::Logger> m_logger{getDummyLogger().clone()};
 };
 }  // namespace Acts
 

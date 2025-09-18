@@ -1,23 +1,24 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Geometry/Polyhedron.hpp"
 
 #include "Acts/Surfaces/detail/VerticesHelper.hpp"
-#include "Acts/Utilities/BinningType.hpp"
+#include "Acts/Visualization/IVisualization3D.hpp"
 
 #include <algorithm>
-#include <cmath>
 #include <limits>
-#include <utility>
+#include <numbers>
 
-void Acts::Polyhedron::merge(const Acts::Polyhedron& other) {
-  size_t cvert = vertices.size();
+namespace Acts {
+
+void Polyhedron::merge(const Polyhedron& other) {
+  std::size_t cvert = vertices.size();
   vertices.insert(vertices.end(), other.vertices.begin(), other.vertices.end());
   /// Add the new faces with offsets
   auto join = [&](std::vector<FaceType>& existing,
@@ -25,7 +26,7 @@ void Acts::Polyhedron::merge(const Acts::Polyhedron& other) {
     for (const auto& aface : additional) {
       FaceType nface = aface;
       std::transform(nface.begin(), nface.end(), nface.begin(),
-                     [&](size_t x) { return (x + cvert); });
+                     [&](std::size_t x) { return (x + cvert); });
       existing.push_back(nface);
     }
   };
@@ -34,12 +35,12 @@ void Acts::Polyhedron::merge(const Acts::Polyhedron& other) {
   join(triangularMesh, other.triangularMesh);
 }
 
-void Acts::Polyhedron::move(const Transform3& transform) {
+void Polyhedron::move(const Transform3& transform) {
   for_each(vertices.begin(), vertices.end(),
            [&](auto& v) { v = transform * v; });
 }
 
-Acts::Extent Acts::Polyhedron::extent(const Transform3& transform) const {
+Extent Polyhedron::extent(const Transform3& transform) const {
   Extent extent;
   auto vtxs = vertices;
   std::transform(vtxs.begin(), vtxs.end(), vtxs.begin(), [&](auto& v) {
@@ -48,10 +49,11 @@ Acts::Extent Acts::Polyhedron::extent(const Transform3& transform) const {
     return (vt);
   });
 
-  // Special checks of binR for hyper plane surfaces
+  // Special checks of AxisDirection::AxisR for hyper plane surfaces
   if (detail::VerticesHelper::onHyperPlane(vtxs)) {
     // Check inclusion of origin (i.e. convex around origin)
-    Vector3 origin = transform * Vector3(0., 0., extent.medium(binZ));
+    Vector3 origin =
+        transform * Vector3(0., 0., extent.medium(AxisDirection::AxisZ));
     for (const auto& face : faces) {
       std::vector<Vector3> tface;
       tface.reserve(face.size());
@@ -59,8 +61,9 @@ Acts::Extent Acts::Polyhedron::extent(const Transform3& transform) const {
         tface.push_back(vtxs[f]);
       }
       if (detail::VerticesHelper::isInsidePolygon(origin, tface)) {
-        extent.range(binR).setMin(0.);
-        extent.range(binPhi).set(-M_PI, M_PI);
+        extent.range(AxisDirection::AxisR).setMin(0.);
+        extent.range(AxisDirection::AxisPhi)
+            .set(-std::numbers::pi, std::numbers::pi);
         break;
       }
     }
@@ -86,12 +89,25 @@ Acts::Extent Acts::Polyhedron::extent(const Transform3& transform) const {
         return dist;
       };
 
-      for (size_t iv = 1; iv < vtxs.size() + 1; ++iv) {
-        size_t fpoint = iv < vtxs.size() ? iv : 0;
+      for (std::size_t iv = 1; iv < vtxs.size() + 1; ++iv) {
+        std::size_t fpoint = iv < vtxs.size() ? iv : 0;
         double testR = radialDistance(vtxs[fpoint], vtxs[iv - 1]);
-        extent.range(binR).expandMin(testR);
+        extent.range(AxisDirection::AxisR).expandMin(testR);
       }
     }
   }
   return extent;
 }
+
+void Polyhedron::visualize(IVisualization3D& helper,
+                           const ViewConfig& viewConfig) const {
+  if (viewConfig.visible) {
+    if (!viewConfig.triangulate) {
+      helper.faces(vertices, faces, viewConfig.color);
+    } else {
+      helper.faces(vertices, triangularMesh, viewConfig.color);
+    }
+  }
+}
+
+}  // namespace Acts

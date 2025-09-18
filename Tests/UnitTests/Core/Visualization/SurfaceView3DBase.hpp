@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -29,16 +29,15 @@
 #include "Acts/Visualization/IVisualization3D.hpp"
 
 #include <fstream>
+#include <numbers>
 #include <sstream>
 #include <string>
 
-namespace Acts {
+namespace Acts::SurfaceView3DTest {
 
-namespace SurfaceView3DTest {
-
-/// Helper method to visualiza all types of surfaces
+/// Helper method to visualize all types of surfaces
 ///
-/// @param helper The visualziation helper
+/// @param helper The visualization helper
 /// @param triangulate The directive whether to create triangular meshes
 /// @param tag The test tag (mode) identification
 ///
@@ -49,8 +48,8 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   auto identity = Transform3::Identity();
   std::stringstream cStream;
 
-  double halfPhiSector = M_PI / 4.;
-  double centralPhi = M_PI / 2.;
+  const double halfPhiSector = std::numbers::pi / 4.;
+  const double centralPhi = std::numbers::pi / 2.;
 
   ViewConfig sConfig = s_viewSensitive;
   sConfig.triangulate = triangulate;
@@ -70,7 +69,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   coneSurfaces.push_back(cone);
   GeometryView3D::drawSurface(helper, *cone, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_ConeSurface") + tag);
   helper.write(cStream);
   helper.clear();
@@ -82,7 +81,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   coneSurfaces.push_back(cone);
   GeometryView3D::drawSurface(helper, *cone, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_ConeSurfaceSector") + tag);
   helper.write(cStream);
   helper.clear();
@@ -94,7 +93,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   coneSurfaces.push_back(cone);
   GeometryView3D::drawSurface(helper, *cone, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_ConeSurfaceSectorShifted") + tag);
   helper.write(cStream);
   helper.clear();
@@ -105,7 +104,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
       Transform3(Translation3{0., 0., 0.}),
       Transform3(Translation3{0.75 * coneMaxZ, 0., 0.})};
 
-  for (size_t ic = 0; ic < coneSurfaces.size(); ++ic) {
+  for (std::size_t ic = 0; ic < coneSurfaces.size(); ++ic) {
     GeometryView3D::drawSurface(helper, *coneSurfaces[ic], gctx, threeCones[ic],
                                 sConfig);
   }
@@ -128,7 +127,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   cylinderSurfaces.push_back(cylinder);
   GeometryView3D::drawSurface(helper, *cylinder, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_CylinderSurface") + tag);
   helper.write(cStream);
   helper.clear();
@@ -140,7 +139,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   cylinderSurfaces.push_back(cylinder);
   GeometryView3D::drawSurface(helper, *cylinder, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_CylinderSurfaceSector") + tag);
   helper.write(cStream);
   helper.clear();
@@ -152,7 +151,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   cylinderSurfaces.push_back(cylinder);
   GeometryView3D::drawSurface(helper, *cylinder, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_CylinderSurfaceSectorShifted") + tag);
   helper.write(cStream);
   helper.clear();
@@ -163,7 +162,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
       Transform3(Translation3{0., 0., 0.}),
       Transform3(Translation3{2.5 * cylinderRadius, 0., 0.})};
 
-  for (size_t ic = 0; ic < cylinderSurfaces.size(); ++ic) {
+  for (std::size_t ic = 0; ic < cylinderSurfaces.size(); ++ic) {
     GeometryView3D::drawSurface(helper, *cylinderSurfaces[ic], gctx,
                                 threeCylinders[ic], sConfig);
   }
@@ -181,7 +180,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
     auto bbSurface = Surface::makeShared<PlaneSurface>(identity, bbBounds);
     GeometryView3D::drawSurface(helper, *bbSurface, gctx,
                                 Transform3::Identity(), sConfig);
-    ;
+
     helper.write(bbPath);
     helper.write(cStream);
     helper.clear();
@@ -201,7 +200,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   radialSurfaces.push_back(disc);
   GeometryView3D::drawSurface(helper, *disc, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(std::string("Surfaces_DiscSurfaceFull") + tag);
   helper.write(cStream);
   helper.clear();
@@ -272,7 +271,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
       Transform3(Translation3{-2.0 * discRmax, -1.5 * discRmax, 0.}),
       Transform3(Translation3{0., -1.5 * discRmax, 0.}),
       Transform3(Translation3{2.5 * discRmax, -1.5 * discRmax, 0.})};
-  for (size_t ir = 0; ir < radialSurfaces.size(); ++ir) {
+  for (std::size_t ir = 0; ir < radialSurfaces.size(); ++ir) {
     GeometryView3D::drawSurface(helper, *radialSurfaces[ir], gctx, sixDiscs[ir],
                                 sConfig);
   }
@@ -292,7 +291,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   GeometryView3D::drawSurface(helper, *disc, gctx, Transform3::Identity(),
                               sConfig);
 
-  helper.write(std::string("Surfaces_DiscAnulusBounds") + tag);
+  helper.write(std::string("Surfaces_DiscAnnulusBounds") + tag);
   helper.write(cStream);
   helper.clear();
 
@@ -313,7 +312,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   std::vector<Transform3> twoAnomalDiscs = {
       Transform3(Translation3{-5., 0., 0.}),
       Transform3(Translation3{5., 0., 0.})};
-  for (size_t id = 0; id < anomalDiscSurfaces.size(); ++id) {
+  for (std::size_t id = 0; id < anomalDiscSurfaces.size(); ++id) {
     GeometryView3D::drawSurface(helper, *anomalDiscSurfaces[id], gctx,
                                 sixDiscs[id], sConfig);
   }
@@ -337,7 +336,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   planarSurfaces.push_back(plane);
   GeometryView3D::drawSurface(helper, *plane, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(name + tag);
   helper.write(cStream);
   helper.clear();
@@ -351,7 +350,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   planarSurfaces.push_back(plane);
   GeometryView3D::drawSurface(helper, *plane, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(name + tag);
   helper.write(cStream);
   helper.clear();
@@ -365,7 +364,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   planarSurfaces.push_back(plane);
   GeometryView3D::drawSurface(helper, *plane, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(name + tag);
   helper.write(cStream);
   helper.clear();
@@ -379,7 +378,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   planarSurfaces.push_back(plane);
   GeometryView3D::drawSurface(helper, *plane, gctx, Transform3::Identity(),
                               sConfig);
-  ;
+
   helper.write(name + tag);
   helper.write(cStream);
   helper.clear();
@@ -477,7 +476,7 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
       Transform3(Translation3{-10, 10., 0.}),
       Transform3(Translation3{0., 10., 0.}),
       Transform3(Translation3{10., 10., 0.})};
-  for (size_t ip = 0; ip < planarSurfaces.size(); ++ip) {
+  for (std::size_t ip = 0; ip < planarSurfaces.size(); ++ip) {
     GeometryView3D::drawSurface(helper, *planarSurfaces[ip], gctx,
                                 ninePlanes[ip], sConfig);
   }
@@ -500,5 +499,4 @@ static inline std::string run(IVisualization3D& helper, bool triangulate,
   return cStream.str();
 }
 
-}  // namespace SurfaceView3DTest
-}  // namespace Acts
+}  // namespace Acts::SurfaceView3DTest

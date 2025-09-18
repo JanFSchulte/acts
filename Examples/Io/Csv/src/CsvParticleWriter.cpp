@@ -1,21 +1,22 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "ActsExamples/Io/Csv/CsvParticleWriter.hpp"
 
-#include "ActsExamples/Framework/WhiteBoard.hpp"
+#include "ActsExamples/Framework/AlgorithmContext.hpp"
+#include "ActsExamples/Io/Csv/CsvInputOutput.hpp"
 #include "ActsExamples/Utilities/Paths.hpp"
+#include "ActsFatras/EventData/Barcode.hpp"
+#include "ActsFatras/EventData/Particle.hpp"
 #include <Acts/Definitions/Units.hpp>
 
-#include <map>
 #include <stdexcept>
-
-#include <dfe/dfe_io_dsv.hpp>
+#include <vector>
 
 #include "CsvOutputData.hpp"
 
@@ -25,7 +26,7 @@ ActsExamples::CsvParticleWriter::CsvParticleWriter(
     : WriterT(cfg.inputParticles, "CsvParticleWriter", lvl), m_cfg(cfg) {
   // inputParticles is already checked by base constructor
   if (m_cfg.outputStem.empty()) {
-    throw std::invalid_argument("Missing ouput filename stem");
+    throw std::invalid_argument("Missing output filename stem");
   }
 }
 
@@ -34,8 +35,8 @@ ActsExamples::ProcessCode ActsExamples::CsvParticleWriter::writeT(
     const SimParticleContainer& particles) {
   auto pathParticles = perEventFilepath(
       m_cfg.outputDir, m_cfg.outputStem + ".csv", ctx.eventNumber);
-  dfe::NamedTupleCsvWriter<ParticleData> writer(pathParticles,
-                                                m_cfg.outputPrecision);
+  ActsExamples::NamedTupleCsvWriter<ParticleData> writer(pathParticles,
+                                                         m_cfg.outputPrecision);
 
   ParticleData data;
   for (const auto& particle : particles) {
@@ -45,11 +46,11 @@ ActsExamples::ProcessCode ActsExamples::CsvParticleWriter::writeT(
     data.vx = particle.position().x() / Acts::UnitConstants::mm;
     data.vy = particle.position().y() / Acts::UnitConstants::mm;
     data.vz = particle.position().z() / Acts::UnitConstants::mm;
-    data.vt = particle.time() / Acts::UnitConstants::ns;
+    data.vt = particle.time() / Acts::UnitConstants::mm;
     const auto p = particle.absoluteMomentum() / Acts::UnitConstants::GeV;
-    data.px = p * particle.unitDirection().x();
-    data.py = p * particle.unitDirection().y();
-    data.pz = p * particle.unitDirection().z();
+    data.px = p * particle.direction().x();
+    data.py = p * particle.direction().y();
+    data.pz = p * particle.direction().z();
     data.m = particle.mass() / Acts::UnitConstants::GeV;
     data.q = particle.charge() / Acts::UnitConstants::e;
     writer.append(data);

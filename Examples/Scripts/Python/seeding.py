@@ -5,8 +5,10 @@ import argparse
 
 import acts
 import acts.examples
+from acts.examples.odd import getOpenDataDetector
 
 u = acts.UnitConstants
+
 
 # Graciously taken from https://stackoverflow.com/a/60750535/4280680
 class EnumAction(argparse.Action):
@@ -48,9 +50,8 @@ def runSeeding(
     field,
     outputDir,
     s=None,
-    seedingAlgorithm=SeedingAlgorithm.Default,
+    seedingAlgorithm=SeedingAlgorithm.GridTriplet,
 ):
-
     from acts.examples.simulation import (
         addParticleGun,
         EtaConfig,
@@ -58,6 +59,8 @@ def runSeeding(
         ParticleConfig,
         addFatras,
         addDigitization,
+        ParticleSelectorConfig,
+        addDigiParticleSelection,
     )
 
     s = s or acts.examples.Sequencer(
@@ -84,7 +87,6 @@ def runSeeding(
         outputDirCsv=outputDir / "csv",
         outputDirRoot=outputDir,
         rnd=rnd,
-        preselectParticles=None,
     )
 
     srcdir = Path(__file__).resolve().parent.parent.parent.parent
@@ -92,14 +94,22 @@ def runSeeding(
         s,
         trackingGeometry,
         field,
-        digiConfigFile=srcdir
-        / "Examples/Algorithms/Digitization/share/default-smearing-config-generic.json",
+        digiConfigFile=srcdir / "Examples/Configs/generic-digi-smearing-config.json",
         rnd=rnd,
     )
+
+    addDigiParticleSelection(
+        s,
+        ParticleSelectorConfig(
+            pt=(1.0 * u.GeV, None),
+            eta=(-2.5, 2.5),
+            measurements=(9, None),
+            removeNeutral=True,
+        ),
+    )
+
     from acts.examples.reconstruction import (
         addSeeding,
-        TruthSeedRanges,
-        ParticleSmearingSigmas,
         SeedFinderConfigArg,
         SeedFinderOptionsArg,
     )
@@ -108,11 +118,9 @@ def runSeeding(
         s,
         trackingGeometry,
         field,
-        TruthSeedRanges(pt=(1.0 * u.GeV, None), eta=(-2.5, 2.5), nHits=(9, None)),
-        ParticleSmearingSigmas(pRel=0.01),  # only used by SeedingAlgorithm.TruthSmeared
         SeedFinderConfigArg(
             r=(None, 200 * u.mm),  # rMin=default, 33mm
-            deltaR=(1 * u.mm, 60 * u.mm),
+            deltaR=(1 * u.mm, 300 * u.mm),
             collisionRegion=(-250 * u.mm, 250 * u.mm),
             z=(-2000 * u.mm, 2000 * u.mm),
             maxSeedsPerSpM=1,
@@ -122,13 +130,11 @@ def runSeeding(
             impactMax=3 * u.mm,
         ),
         SeedFinderOptionsArg(
-            bFieldInZ=1.99724 * u.T,
+            bFieldInZ=2 * u.T,
         ),
         acts.logging.VERBOSE,
         seedingAlgorithm=seedingAlgorithm,
-        geoSelectionConfigFile=srcdir
-        / "Examples/Algorithms/TrackFinding/share/geoSelection-genericDetector.json",
-        inputParticles="particles_final",  # use this to reproduce the original root_file_hashes.txt - remove to fix
+        geoSelectionConfigFile=srcdir / "Examples/Configs/generic-seeding-config.json",
         outputDirRoot=outputDir,
     )
     return s
@@ -143,13 +149,14 @@ if "__main__" == __name__:
         "--algorithm",
         action=EnumAction,
         enum=SeedingAlgorithm,
-        default=SeedingAlgorithm.Default,
+        default=SeedingAlgorithm.GridTriplet,
         help="Select the seeding algorithm to use",
     )
 
     args = p.parse_args()
-    # detector, trackingGeometry, _ = getOpenDataDetector(    getOpenDataDetectorDirectory() )
-    detector, trackingGeometry, _ = acts.examples.GenericDetector.create()
+    # detector = getOpenDataDetector()
+    detector = acts.examples.GenericDetector()
+    trackingGeometry = detector.trackingGeometry()
 
     field = acts.ConstantBField(acts.Vector3(0, 0, 2 * u.T))
 

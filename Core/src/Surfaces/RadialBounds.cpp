@@ -1,47 +1,92 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Surfaces/RadialBounds.hpp"
 
 #include "Acts/Surfaces/detail/VerticesHelper.hpp"
 #include "Acts/Utilities/detail/periodic.hpp"
 
-#include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <stdexcept>
 
-Acts::SurfaceBounds::BoundsType Acts::RadialBounds::type() const {
-  return SurfaceBounds::eDisc;
+namespace Acts {
+
+std::vector<double> RadialBounds::values() const {
+  return {m_values.begin(), m_values.end()};
 }
 
-Acts::Vector2 Acts::RadialBounds::shifted(
-    const Acts::Vector2& lposition) const {
+void RadialBounds::checkConsistency() noexcept(false) {
+  if (get(eMinR) < 0. || get(eMaxR) <= 0. || get(eMinR) > get(eMaxR)) {
+    throw std::invalid_argument("RadialBounds: invalid radial setup");
+  }
+  if (get(eHalfPhiSector) < 0. || get(eHalfPhiSector) > std::numbers::pi) {
+    throw std::invalid_argument("RadialBounds: invalid phi sector setup.");
+  }
+  if (get(eAveragePhi) != detail::radian_sym(get(eAveragePhi))) {
+    throw std::invalid_argument("RadialBounds: invalid phi positioning.");
+  }
+}
+
+SquareMatrix2 RadialBounds::boundToCartesianJacobian(
+    const Vector2& lposition) const {
+  SquareMatrix2 j;
+  j(0, 0) = std::cos(lposition[1] - get(eAveragePhi));
+  j(0, 1) = -lposition[0] * std::sin(lposition[1] - get(eAveragePhi));
+  j(1, 0) = std::sin(lposition[1] - get(eAveragePhi));
+  j(1, 1) = lposition[0] * std::cos(lposition[1] - get(eAveragePhi));
+  return j;
+}
+
+SquareMatrix2 RadialBounds::boundToCartesianMetric(
+    const Vector2& lposition) const {
+  SquareMatrix2 m;
+  m(0, 0) = 1;
+  m(0, 1) = 0;
+  m(1, 0) = 0;
+  m(1, 1) = lposition[0] * lposition[0];
+  return m;
+}
+
+Vector2 RadialBounds::shifted(const Vector2& lposition) const {
   Vector2 tmp;
-  tmp[eBoundLoc0] = lposition[eBoundLoc0];
-  tmp[eBoundLoc1] =
-      detail::radian_sym(lposition[eBoundLoc1] - get(eAveragePhi));
+  tmp[0] = lposition[0];
+  tmp[1] = detail::radian_sym(lposition[1] - get(eAveragePhi));
   return tmp;
 }
 
-bool Acts::RadialBounds::inside(const Acts::Vector2& lposition,
-                                const Acts::BoundaryCheck& bcheck) const {
-  return bcheck.isInside(shifted(lposition),
-                         Vector2(get(eMinR), -get(eHalfPhiSector)),
-                         Vector2(get(eMaxR), get(eHalfPhiSector)));
+bool RadialBounds::inside(const Vector2& lposition) const {
+  return detail::VerticesHelper::isInsideRectangle(
+      shifted(lposition), Vector2(get(eMinR), -get(eHalfPhiSector)),
+      Vector2(get(eMaxR), get(eHalfPhiSector)));
 }
 
-std::vector<Acts::Vector2> Acts::RadialBounds::vertices(
-    unsigned int lseg) const {
+Vector2 RadialBounds::closestPoint(const Vector2& lposition,
+                                   const SquareMatrix2& metric) const {
+  return detail::VerticesHelper::computeClosestPointOnAlignedBox(
+      Vector2(get(eMinR), -get(eHalfPhiSector)),
+      Vector2(get(eMaxR), get(eHalfPhiSector)), shifted(lposition), metric);
+}
+
+std::vector<Vector2> RadialBounds::vertices(unsigned int lseg) const {
   return detail::VerticesHelper::circularVertices(
       get(eMinR), get(eMaxR), get(eAveragePhi), get(eHalfPhiSector), lseg);
 }
 
-std::ostream& Acts::RadialBounds::toStream(std::ostream& sl) const {
+Vector2 RadialBounds::center() const {
+  // For radial bounds in polar coordinates (r, phi),
+  // centroid is at the middle radius and average phi
+  double rCentroid = 0.5 * (get(eMinR) + get(eMaxR));
+  double phiCentroid = get(eAveragePhi);
+  return Vector2(rCentroid, phiCentroid);
+}
+
+std::ostream& RadialBounds::toStream(std::ostream& sl) const {
   sl << std::setiosflags(std::ios::fixed);
   sl << std::setprecision(7);
   sl << "Acts::RadialBounds:  (innerRadius, outerRadius, hPhiSector, "
@@ -51,3 +96,5 @@ std::ostream& Acts::RadialBounds::toStream(std::ostream& sl) const {
   sl << std::setprecision(-1);
   return sl;
 }
+
+}  // namespace Acts

@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2016-2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "Acts/Geometry/PassiveLayerBuilder.hpp"
 
@@ -17,45 +17,50 @@
 #include "Acts/Surfaces/Surface.hpp"
 #include "Acts/Surfaces/SurfaceArray.hpp"
 
-Acts::PassiveLayerBuilder::PassiveLayerBuilder(
+#include <cstddef>
+#include <ostream>
+#include <utility>
+
+namespace Acts {
+
+PassiveLayerBuilder::PassiveLayerBuilder(
     const PassiveLayerBuilder::Config& plConfig,
     std::unique_ptr<const Logger> logger)
     : m_cfg(), m_logger(std::move(logger)) {
   setConfiguration(plConfig);
 }
 
-void Acts::PassiveLayerBuilder::setConfiguration(
+void PassiveLayerBuilder::setConfiguration(
     const PassiveLayerBuilder::Config& plConfig) {
   //!< @todo add configuration check
   m_cfg = plConfig;
 }
 
-void Acts::PassiveLayerBuilder::setLogger(
-    std::unique_ptr<const Logger> newLogger) {
+void PassiveLayerBuilder::setLogger(std::unique_ptr<const Logger> newLogger) {
   m_logger = std::move(newLogger);
 }
 
-const Acts::LayerVector Acts::PassiveLayerBuilder::positiveLayers(
+const LayerVector PassiveLayerBuilder::positiveLayers(
     const GeometryContext& gctx) const {
   return endcapLayers(gctx, 1);
 }
 
-const Acts::LayerVector Acts::PassiveLayerBuilder::negativeLayers(
+const LayerVector PassiveLayerBuilder::negativeLayers(
     const GeometryContext& gctx) const {
   return endcapLayers(gctx, -1);
 }
 
-const Acts::LayerVector Acts::PassiveLayerBuilder::endcapLayers(
-    const Acts::GeometryContext& /*gctx*/, int side) const {
+const LayerVector PassiveLayerBuilder::endcapLayers(
+    const GeometryContext& /*gctx*/, int side) const {
   LayerVector eLayers;
   // pos/neg layers
-  size_t numpnLayers = m_cfg.posnegLayerPositionZ.size();
+  std::size_t numpnLayers = m_cfg.posnegLayerPositionZ.size();
   if (numpnLayers != 0u) {
     ACTS_DEBUG("Configured to build " << numpnLayers
                                       << " passive layers on side :" << side);
     eLayers.reserve(numpnLayers);
     // loop through
-    for (size_t ipnl = 0; ipnl < numpnLayers; ++ipnl) {
+    for (std::size_t ipnl = 0; ipnl < numpnLayers; ++ipnl) {
       // some screen output
       ACTS_VERBOSE("- build layers "
                    << (ipnl)
@@ -89,17 +94,17 @@ const Acts::LayerVector Acts::PassiveLayerBuilder::endcapLayers(
   return eLayers;
 }
 
-const Acts::LayerVector Acts::PassiveLayerBuilder::centralLayers(
-    const Acts::GeometryContext& /*gctx*/) const {
+const LayerVector PassiveLayerBuilder::centralLayers(
+    const GeometryContext& /*gctx*/) const {
   LayerVector cLayers;
   // the central layers
-  size_t numcLayers = m_cfg.centralLayerRadii.size();
+  std::size_t numcLayers = m_cfg.centralLayerRadii.size();
   if (numcLayers != 0u) {
     ACTS_DEBUG("Configured to build " << numcLayers
                                       << " passive central layers.");
     cLayers.reserve(numcLayers);
     // loop through
-    for (size_t icl = 0; icl < numcLayers; ++icl) {
+    for (std::size_t icl = 0; icl < numcLayers; ++icl) {
       // some screen output
       ACTS_VERBOSE("- build layer "
                    << icl
@@ -127,3 +132,5 @@ const Acts::LayerVector Acts::PassiveLayerBuilder::centralLayers(
   }
   return cLayers;
 }
+
+}  // namespace Acts

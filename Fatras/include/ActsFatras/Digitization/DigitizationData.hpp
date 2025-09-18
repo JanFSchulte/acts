@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #pragma once
 
@@ -17,13 +17,13 @@
 namespace ActsFatras {
 
 /// A single cell definition: index, cell central value
-using Cell = std::pair<unsigned int, Acts::ActsScalar>;
+using Cell = std::pair<unsigned int, double>;
 
 /// A channel definition: Cell identification, readout word, links
 ///
 /// @tparam signal_t Type of the signal, requires += operator
 /// @tparam kSize Number of channel coordinates
-template <typename signal_t, size_t kSize>
+template <typename signal_t, std::size_t kSize>
 struct Channel {
   /// The cell identification in sizeof..(kParameters) dimensions
   std::array<Cell, kSize> cellId;
@@ -35,7 +35,7 @@ struct Channel {
 
   /// Channel constructor
   ///
-  /// @param cellId_ The Cell idenficiation and position
+  /// @param cellId_ The Cell identification and position
   /// @param value_ The Cell value
   /// @param links_ The (optional) links to e.g. truth indices
   Channel(std::array<Cell, kSize> cellId_, signal_t value_,
@@ -49,11 +49,10 @@ struct Channel {
 ///
 /// @tparam signal_t Type of the signal carried, see above
 /// @tparam kSize Number of cluster coordinates
-template <typename signal_t, size_t kSize>
+template <typename signal_t, std::size_t kSize>
 struct Cluster {
-  using Scalar = Acts::ActsScalar;
   using ParametersVector = Acts::ActsVector<kSize>;
-  using CovarianceMatrix = Acts::ActsSymMatrix<kSize>;
+  using CovarianceMatrix = Acts::ActsSquareMatrix<kSize>;
 
   /// Measured parameters.
   ParametersVector parameters = ParametersVector::Zero();

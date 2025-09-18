@@ -1,3 +1,0 @@
-set(unittest_extra_libraries ActsPluginExaTrkX)
-
-add_unittest(ExaTrkXEdgeBuilding ExaTrkXEdgeBuildingTest.cpp)

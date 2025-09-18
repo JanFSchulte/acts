@@ -1,12 +1,14 @@
 target_sources(
-  ActsCore
-  PRIVATE
-    NeutralTrackParameters.cpp
-    PrintParameters.cpp
-    TrackParameters.cpp
-    TransformationBoundToFree.cpp
-    TransformationFreeToBound.cpp
-    CorrectedTransformationFreeToBound.cpp
-    TrackStatePropMask.cpp
-    VectorMultiTrajectory.cpp
+    ActsCore
+    PRIVATE
+        PrintParameters.cpp
+        TrackParameters.cpp
+        TransformationHelpers.cpp
+        CorrectedTransformationFreeToBound.cpp
+        TrackStatePropMask.cpp
+        VectorMultiTrajectory.cpp
+        VectorTrackContainer.cpp
+        TrackParameterHelpers.cpp
+        SeedContainer2.cpp
+        SpacePointContainer2.cpp
 )

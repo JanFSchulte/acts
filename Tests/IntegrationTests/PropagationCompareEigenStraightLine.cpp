@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2020 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/data/test_case.hpp>
 #include <boost/test/unit_test.hpp>
@@ -15,8 +15,6 @@
 #include "Acts/Propagator/EigenStepper.hpp"
 #include "Acts/Propagator/Propagator.hpp"
 #include "Acts/Propagator/StraightLineStepper.hpp"
-
-#include <limits>
 
 #include "PropagationDatasets.hpp"
 #include "PropagationTests.hpp"
@@ -39,10 +37,11 @@ constexpr auto epsMom = 1_eV;
 // relative covariance tolerance
 constexpr auto epsCov = 0.00125;
 
-constexpr auto bz = 2_T;
-
 const Acts::GeometryContext geoCtx;
 const Acts::MagneticFieldContext magCtx;
+
+constexpr auto bz = 2_T;
+
 const auto magFieldZero =
     std::make_shared<MagneticField>(Acts::Vector3::Zero());
 const auto magFieldNonZero =
@@ -55,32 +54,30 @@ const StraightLinePropagator straightPropagator{StraightLineStepper()};
 
 BOOST_AUTO_TEST_SUITE(PropagationCompareEigenStraightLine)
 
-// TODO both the eigen stepper and the straight line stepper do not seem to
-//      handle the neutral parameters correctly. the results contain inf/nan.
-//      fix the propagators and re-enable the tests.
+BOOST_DATA_TEST_CASE(NeutralZeroMagneticField,
+                     ds::phi* ds::thetaCentral* ds::absMomentum* ds::pathLength,
+                     phi, theta, p, s) {
+  runForwardComparisonTest(eigenPropagatorZero, straightPropagator, geoCtx,
+                           magCtx,
+                           makeParametersCurvilinearNeutral(phi, theta, p), s,
+                           epsPos, epsDir, epsMom, epsCov);
+}
 
-// BOOST_DATA_TEST_CASE(NeutralZeroMagneticField,
-//                      ds::phi* ds::theta* ds::absMomentum* ds::pathLength,
-//                      phi, theta, p, s) {
-//   runFreePropagationComparisonTest(
-//       eigenPropagatorZero, straightPropagator, geoCtx, magCtx,
-//       makeParametersCurvilinearNeutral(phi, theta, p), s, epsPos, epsDir,
-//       epsMom, epsCov);
-// }
-
+// TODO https://github.com/acts-project/acts/issues/4375
+//
 // BOOST_DATA_TEST_CASE(NeutralNonZeroMagneticField,
-//                      ds::phi* ds::theta* ds::absMomentum* ds::pathLength,
-//                      phi, theta, p, s) {
-//   runFreePropagationComparisonTest(
+//                      ds::phi* ds::thetaCentral* ds::absMomentum*
+//                      ds::pathLength, phi, theta, p, s) {
+//   runForwardComparisonTest(
 //       eigenPropagatorNonZero, straightPropagator, geoCtx, magCtx,
 //       makeParametersCurvilinearNeutral(phi, theta, p), s, epsPos, epsDir,
-//       epsMom, epsCov);
+//       epsMom, epsCov, CovarianceCheck::Full);
 // }
 
-BOOST_DATA_TEST_CASE(
-    ChargedZeroMagneticField,
-    ds::phi* ds::theta* ds::absMomentum* ds::chargeNonZero* ds::pathLength, phi,
-    theta, p, q, s) {
+BOOST_DATA_TEST_CASE(ChargedZeroMagneticField,
+                     ds::phi* ds::thetaCentral* ds::absMomentum*
+                         ds::chargeNonZero* ds::pathLength,
+                     phi, theta, p, q, s) {
   runForwardComparisonTest(eigenPropagatorZero, straightPropagator, geoCtx,
                            magCtx, makeParametersCurvilinear(phi, theta, p, q),
                            s, epsPos, epsDir, epsMom, epsCov);

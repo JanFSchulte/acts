@@ -1,10 +1,10 @@
-// This file is part of the Acts project.
+// This file is part of the ACTS project.
 //
-// Copyright (C) 2022 CERN for the benefit of the Acts project
+// Copyright (C) 2016 CERN for the benefit of the ACTS project
 //
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include <boost/test/unit_test.hpp>
 
@@ -24,9 +24,10 @@
 
 #include <fstream>
 #include <memory>
+#include <numbers>
 #include <vector>
 
-BOOST_AUTO_TEST_SUITE(LayerSvgConverter)
+BOOST_AUTO_TEST_SUITE(ActSvg)
 
 namespace {
 
@@ -43,29 +44,29 @@ void setupTools() {
   }
 }
 
-std::shared_ptr<Acts::Layer> generateDiscLayer(Acts::ActsScalar rInner,
-                                               Acts::ActsScalar rOuter,
-                                               unsigned int nSegments,
+std::shared_ptr<Acts::Layer> generateDiscLayer(double rInner, double rOuter,
+                                               unsigned int quarterSegments,
                                                unsigned int nRings,
                                                bool useTrapezoids = false) {
-  // Some preperations
+  // Some preparations
   setupTools();
+  unsigned int fullSegments = 4 * quarterSegments;
   std::vector<std::shared_ptr<const Acts::Surface>> moduleSurfaces;
-  Acts::ActsScalar phiStep = 2 * M_PI / nSegments;
-  Acts::ActsScalar rStep = (rOuter - rInner) / nRings;
+  double phiStep = 2 * std::numbers::pi / fullSegments;
+  double rStep = (rOuter - rInner) / nRings;
   // Reserve & fill
-  moduleSurfaces.reserve(nSegments * nRings);
+  moduleSurfaces.reserve(fullSegments * nRings);
   // Radial disc
-  if (not useTrapezoids) {
+  if (!useTrapezoids) {
     for (unsigned int ir = 0; ir < nRings; ++ir) {
       std::shared_ptr<const Acts::RadialBounds> rBounds = nullptr;
       rBounds = std::make_shared<Acts::RadialBounds>(
           rInner + ir * rStep - 0.025 * rInner,
           rInner + (ir + 1u) * rStep + 0.025 * rInner, 0.55 * phiStep, 0.);
-      for (unsigned int is = 0; is < nSegments; ++is) {
+      for (unsigned int is = 0; is < fullSegments; ++is) {
         // Place the module
         auto placement = Acts::Transform3::Identity();
-        if (is % 2) {
+        if ((is % 2) != 0u) {
           placement.pretranslate(Acts::Vector3{0., 0., 2.});
         }
         placement.rotate(
@@ -78,20 +79,20 @@ std::shared_ptr<Acts::Layer> generateDiscLayer(Acts::ActsScalar rInner,
   } else {
     for (unsigned int ir = 0; ir < nRings; ++ir) {
       // Trapezoid parameters
-      Acts::ActsScalar radius = rInner + (ir + 0.5) * rStep;
-      Acts::ActsScalar yHalf = rStep * 0.5125;
+      double radius = rInner + (ir + 0.5) * rStep;
+      double yHalf = rStep * 0.5125;
 
-      Acts::ActsScalar xHalfMin =
-          1.15 * (rInner + ir * rStep) * M_PI / nSegments;
-      Acts::ActsScalar xHalfMax =
-          1.15 * (rInner + (ir + 1) * rStep) * M_PI / nSegments;
+      double xHalfMin =
+          1.15 * (rInner + ir * rStep) * std::numbers::pi / fullSegments;
+      double xHalfMax =
+          1.15 * (rInner + (ir + 1) * rStep) * std::numbers::pi / fullSegments;
 
       std::shared_ptr<const Acts::TrapezoidBounds> tBounds =
           std::make_shared<const Acts::TrapezoidBounds>(xHalfMin, xHalfMax,
                                                         yHalf);
-      for (unsigned int is = 0; is < nSegments; ++is) {
+      for (unsigned int is = 0; is < fullSegments; ++is) {
         // Setting the phi
-        Acts::ActsScalar cphi = -M_PI + is * phiStep;
+        double cphi = -std::numbers::pi + is * phiStep;
         Acts::Vector3 center(radius * std::cos(cphi), radius * std::sin(cphi),
                              (is % 2) * 2 + (ir % 2) * 5);
         // Local axis system
@@ -111,7 +112,7 @@ std::shared_ptr<Acts::Layer> generateDiscLayer(Acts::ActsScalar rInner,
     }
   }
   // Let's create the disc layer
-  return lCreator->discLayer(tgContext, moduleSurfaces, nRings, nSegments);
+  return lCreator->discLayer(tgContext, moduleSurfaces, nRings, fullSegments);
 }
 
 }  // namespace
@@ -125,7 +126,7 @@ BOOST_AUTO_TEST_CASE(DiscLayerRadialSvg) {
   discLayerStyle.highlights = {"mouseover", "mouseout"};
   discLayerStyle.strokeColor = {25, 25, 25};
   discLayerStyle.strokeWidth = 0.5;
-  discLayerStyle.nSegments = 72u;
+  discLayerStyle.quarterSegments = 72u;
 
   Acts::GeometryIdentifier geoID{0};
 
@@ -155,7 +156,7 @@ BOOST_AUTO_TEST_CASE(DiscLayerTrapezoidSvg) {
   discLayerStyle.highlights = {"mouseover", "mouseout"};
   discLayerStyle.strokeColor = {25, 25, 25};
   discLayerStyle.strokeWidth = 0.5;
-  discLayerStyle.nSegments = 72u;
+  discLayerStyle.quarterSegments = 72u;
 
   Acts::GeometryIdentifier geoID{0};
 
@@ -185,7 +186,7 @@ BOOST_AUTO_TEST_CASE(CylinderLayerSvg) {
   cylinderLayerStyle.highlights = {"mouseover", "mouseout"};
   cylinderLayerStyle.strokeColor = {25, 25, 25};
   cylinderLayerStyle.strokeWidth = 0.5;
-  cylinderLayerStyle.nSegments = 72u;
+  cylinderLayerStyle.quarterSegments = 72u;
 
   Acts::GeometryIdentifier geoID{0};
 
@@ -193,22 +194,24 @@ BOOST_AUTO_TEST_CASE(CylinderLayerSvg) {
   auto tGeometry = cGeometry();
   auto pixelVolume =
       tGeometry->lowestTrackingVolume(tgContext, Acts::Vector3(50., 0., 0.));
-  if (pixelVolume != nullptr and pixelVolume->confinedLayers() != nullptr) {
+  if (pixelVolume != nullptr && pixelVolume->confinedLayers() != nullptr) {
     auto layers = pixelVolume->confinedLayers()->arrayObjects();
-    size_t il = 0;
+    std::size_t il = 0;
     for (const auto& layer : layers) {
-      if (layer->surfaceArray() != nullptr) {
-        Acts::Svg::LayerConverter::Options lOptions;
-        lOptions.name = "cylinder_layer_" + std::to_string(il++);
-        lOptions.surfaceStyles = Acts::GeometryHierarchyMap<Acts::Svg::Style>(
-            {{geoID, cylinderLayerStyle}});
+      if (layer->surfaceArray() == nullptr) {
+        continue;
+      }
 
-        // Get the layer sheets
-        auto layerSheets =
-            Acts::Svg::LayerConverter::convert(tgContext, *layer, lOptions);
-        for (const auto& s : layerSheets) {
-          Acts::Svg::toFile({s}, s._id + ".svg");
-        }
+      Acts::Svg::LayerConverter::Options lOptions;
+      lOptions.name = "cylinder_layer_" + std::to_string(il++);
+      lOptions.surfaceStyles = Acts::GeometryHierarchyMap<Acts::Svg::Style>(
+          {{geoID, cylinderLayerStyle}});
+
+      // Get the layer sheets
+      auto layerSheets =
+          Acts::Svg::LayerConverter::convert(tgContext, *layer, lOptions);
+      for (const auto& s : layerSheets) {
+        Acts::Svg::toFile({s}, s._id + ".svg");
       }
     }
   }
