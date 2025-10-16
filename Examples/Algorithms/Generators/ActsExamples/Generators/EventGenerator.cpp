@@ -142,6 +142,30 @@ ProcessCode EventGenerator::read(const AlgorithmContext& ctx) {
   HepMC3Util::mergeEvents(*event, eventPtrs, logger());
   event->set_event_number(static_cast<int>(ctx.eventNumber));
 
+  
+  bool hasTau3Mu = false;
+  int muFromTau = 0;
+  for (long unsigned int ip = 0; ip < event->particles().size(); ++ip) {
+      const auto& genParticle = event->particles()[ip];
+      int genParticleMotherID = -99;
+      int genParticleGrandMotherID = -99;
+      if (genParticle->parents().size() > 0) {
+	      genParticleMotherID = genParticle->parents()[0]->pid();
+              if (genParticle->parents()[0]->parents().size() > 0) genParticleGrandMotherID = genParticle->parents()[0]->parents()[0]->pid();
+      } 
+      if (fabs(genParticle->pid()) == 13 && fabs(genParticleMotherID)  == 15 && fabs(genParticleGrandMotherID) == 431){
+          muFromTau++;
+      }
+  } 
+  if (muFromTau >= 3) hasTau3Mu = true;
+  if (m_cfg.filterTau3Mu && !hasTau3Mu) {
+	//If no tau3mu, make empty event  
+	event = std::make_shared<HepMC3::GenEvent>();
+  	event->set_units(HepMC3::Units::GEV, HepMC3::Units::MM);
+
+  	event->set_event_number(static_cast<int>(ctx.eventNumber));
+  }
+  
   ACTS_VERBOSE("Vertices size: " << event->vertices().size());
   if (m_cfg.printListing) {
     ACTS_VERBOSE("Final event:\n"

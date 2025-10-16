@@ -70,7 +70,7 @@ void addGenerators(Context& ctx) {
     auto config = py::class_<Config>(gen, "Config").def(py::init<>());
 
     ACTS_PYTHON_STRUCT(config, outputEvent, generators, randomNumbers,
-                       printListing);
+                       printListing, filterTau3Mu);
   }
 
   py::class_<GaussianPrimaryVertexPositionGenerator,

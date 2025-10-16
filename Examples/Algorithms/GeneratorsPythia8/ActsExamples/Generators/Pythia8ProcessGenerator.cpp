@@ -70,7 +70,7 @@ Pythia8Generator::Pythia8Generator(const Config& cfg, Acts::Logging::Level lvl)
   // disable all output by default but allow re-enable via config
   m_pythia8->settings.flag("Print:quiet", true);
   for (const auto& setting : m_cfg.settings) {
-    ACTS_VERBOSE("use Pythia8 setting '" << setting << "'");
+    ACTS_INFO("use Pythia8 setting '" << setting << "'");
     m_pythia8->readString(setting.c_str());
   }
   m_pythia8->settings.mode("Beams:idA", m_cfg.pdgBeam0);

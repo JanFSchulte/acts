@@ -72,6 +72,9 @@ class EventGenerator final : public ActsExamples::IReader {
     /// If true, print the listing of the generated event. This can be very
     /// verbose
     bool printListing = false;
+    /// If true, replace events without at least one tau -> 3mu decay 
+    /// with an empty event
+    bool filterTau3Mu = false;
   };
 
   EventGenerator(const Config& cfg, Acts::Logging::Level lvl);
