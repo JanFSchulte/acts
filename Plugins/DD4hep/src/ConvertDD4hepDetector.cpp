@@ -597,7 +597,7 @@ void Acts::collectSubDetectors_dd4hep(
       }
     }
 
-    if (type.is(dd4hep::DetType::TRACKER)) {
+    if (type.is(dd4hep::DetType::TRACKER) || type.is(dd4hep::DetType::MUON)) {
       subdetectors.push_back(childDetElement);
     }
     collectSubDetectors_dd4hep(childDetElement, subdetectors, logger);
