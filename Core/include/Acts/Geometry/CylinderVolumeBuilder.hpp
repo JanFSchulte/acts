@@ -98,7 +98,17 @@ struct VolumeConfig {
   /// @param [in] lConfig is the config to which it should be attached
   /// @note lConfig will be changed
   void midPointAttachZ(VolumeConfig& lConfig) {
-    if (lConfig.zMin >= zMax) {
+    // Decide which config lies at higher z by comparing centers, not raw
+    // boundaries: adjacent regions built from independently-envelope-padded
+    // layers (e.g. a barrel and an endcap disk) can end up overlapping by a
+    // small amount at their shared boundary. A boundary-based check flips to
+    // the wrong branch in that case and produces a wildly wrong midpoint
+    // (attaching this->zMin to lConfig->zMax instead of this->zMax to
+    // lConfig->zMin); comparing centers instead agrees with the boundary
+    // check whenever the configs don't overlap, and stays correct when they
+    // do.
+    bool lIsHigher = 0.5 * (lConfig.zMin + lConfig.zMax) >= 0.5 * (zMin + zMax);
+    if (lIsHigher) {
       double zMid = 0.5 * (lConfig.zMin + zMax);
       lConfig.zMin = zMid;
       zMax = zMid;

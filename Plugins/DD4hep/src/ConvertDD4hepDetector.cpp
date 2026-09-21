@@ -221,7 +221,8 @@ std::shared_ptr<const Acts::CylinderVolumeBuilder> Acts::volumeBuilder_dd4hep(
 
       dd4hep::DetType type{volumeDetElement.typeFlag()};
 
-      if (!type.is(dd4hep::DetType::TRACKER)) {
+      if (!type.is(dd4hep::DetType::TRACKER) &&
+          !type.is(dd4hep::DetType::MUON)) {
         continue;
       }
 
