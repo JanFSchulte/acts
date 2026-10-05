@@ -1,9 +1,9 @@
 #!/bin/sh
-#SBATCH --job-name=ACTS #Job name
+#SBATCH --job-name=ACTS_tau3mu #Job name
 #SBATCH --mail-type=FAIL # Mail events (NONE, BEGIN, END, FAIL, ALL)
-#SBATCH --mail-user=schul105@purdue.edu # Where to send mail	
+#SBATCH --mail-user=schul105@purdue.edu # Where to send mail
 #SBATCH --account=cms-express
-#SBATCH --output=/home/schul105/depot/ACTS/clean/acts/Examples/Scripts/Python/slurm_output/test-%A.out	# Name output file 
+#SBATCH --output=/home/schul105/depot/ACTS/test/acts/Examples/Scripts/Python/slurm_output/test-%A.out	# Name output file
 
 NJOB=$1
 
@@ -22,25 +22,27 @@ SEED=$(( (h ^ (h >> 16)) & 0xFFFFFFFF ))
 
 pwd; date; hostname
 
+#   Tau3Mu production with the muon-system-fixed ACTS/OpenDataDetector build
+#   $1 == input parameter (job index, used for output naming); SEED (derived above) is
+#   the actual random seed passed to the generator.
 
-#   Run fewzz job  DY 1D in M   PI bkg
-#   $1 == input parameter (working directory)
-
-mydir=/home/schul105/depot/ACTS/clean/acts/Examples/Scripts/Python/
+mydir=/home/schul105/depot/ACTS/test/acts/Examples/Scripts/Python/
 cd $mydir
 source /cvmfs/sft.cern.ch/lcg/views/LCG_107/x86_64-el8-gcc11-opt/setup.sh
 module load gcc/14.1.0
 source ../../../build/python/setup.sh
+source ../../../build/thirdparty/OpenDataDetector/this_odd.sh
 
 echo "Working in "`pwd`
 
 echo "Will run Tau3Mu Generation with ACTS for job = " ${NJOB} " seed = " ${SEED}
 
-python full_chain_odd_tau3mu.py --ttbar --events 2000 --rs ${SEED} --output /tmp/odd_output_tau3mu_run_${NJOB} --no-output-root --no-output-obj
+python3.11 full_chain_odd_tau3mu.py --ttbar --events 2000 --rs ${SEED} --output /tmp/odd_output_tau3mu_run_${NJOB} --no-output-root --no-output-obj
 
-python cleanEmptyEvents.py ${NJOB}
+python3.11 cleanEmptyEvents.py ${NJOB}
 
-tar -cvf odd_output_tau3mu_run_${NJOB}.tar /tmp/odd_output_tau3mu_run_${NJOB}
+tar -cf production_tau3mu/odd_output_tau3mu_run_${NJOB}.tar -C /tmp odd_output_tau3mu_run_${NJOB}
+
+rm -rf /tmp/odd_output_tau3mu_run_${NJOB}
 
 date
-

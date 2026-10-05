@@ -260,7 +260,7 @@ else:
         print ("adding pythia 8")
         addPythia8(
             s,
-            hardProcess=["SoftQCD:nonDiffractive=on", "SoftQCD:singleDiffractive=on", "SoftQCD:singleDiffractive=on", "431:onMode=off", "431:onIfAny=15", "15:addChannel = on .01 0 13 13 -13", "15:onMode=off", "15:onIfMatch = 13 13 13"],
+            hardProcess=["SoftQCD:nonDiffractive=on", "SoftQCD:singleDiffractive=on", "SoftQCD:singleDiffractive=on", "431:onMode=off", "431:onIfAny=15", "15:addChannel = on .01 0 13 13 -13", "15:onMode=off", "15:onIfMatch = 13 13 -13"],
             npileup=args.ttbar_pu,
             vtxGen=acts.examples.GaussianVertexGenerator(
                 mean=acts.Vector4(0, 0, 0, 0),

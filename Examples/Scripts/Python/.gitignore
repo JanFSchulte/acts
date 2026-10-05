@@ -1,0 +1,10 @@
+# Local tau3mu production outputs and run artifacts -- not source, not tracked.
+/production_tau3mu/
+/production_tau3mu_biased_seed/
+/largeseed_test/
+/slurm_output/
+/test/
+*.tar
+submit_regen.log
+wait_and_analyze_regen.out
+regen_production.log
