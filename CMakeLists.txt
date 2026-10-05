@@ -361,13 +361,24 @@ endif()
 if(ACTS_BUILD_PLUGIN_DD4HEP)
     # Explicitly find python so we can more easily override the version
     find_package(Python 3.8 REQUIRED COMPONENTS Interpreter Development)
+    # NOTE(purdue-af): intentionally not REQUIRED here. A DD4hep built with
+    # Geant4 support (e.g. the LCG releases on CVMFS) pulls in
+    # Geant4Config.cmake, whose vis subsystem transitively calls
+    # find_dependency(Motif) et al. REQUIRED propagates down through
+    # find_dependency(), turning a missing Motif/OpenMotif into a hard
+    # configure failure even though nothing here uses Geant4 visualization.
+    # See Examples/Scripts/Python/purdue_af/README.md. We check DD4hep_FOUND
+    # explicitly below instead, which only depends on the DDCore/DDDetectors
+    # components actually used.
     find_package(
         DD4hep
         ${_acts_dd4hep_version}
-        REQUIRED
         CONFIG
         COMPONENTS DDCore DDDetectors
     )
+    if(NOT DD4hep_FOUND)
+        message(FATAL_ERROR "DD4hep (DDCore/DDDetectors) not found")
+    endif()
 endif()
 if(ACTS_BUILD_PLUGIN_JSON)
     if(ACTS_USE_SYSTEM_NLOHMANN_JSON)
