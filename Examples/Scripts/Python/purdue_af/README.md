@@ -85,9 +85,19 @@ across a Dask Gateway cluster on Kubernetes. Each task runs
 1. Create a Dask cluster (via the Purdue AF agentic-interface's
    `create_dask_cluster`, or the equivalent dashboard/notebook flow), with:
    - `pixi_project` set to `/work/users/$USER/acts_tau3mu/.purdue-af/daskenv`
-   - `worker_cores` / `worker_memory` sized to taste (the original SLURM
+   - `worker_cores` / `worker_memory` sized to one job (the original SLURM
      jobs requested 10 cores each; each job here is a single
-     `full_chain_odd_tau3mu.py` process)
+     `full_chain_odd_tau3mu.py` process). `worker_cores=4`/`worker_memory=8`
+     (GiB) is a tested-safe starting point for the 2000-event/PU200 default.
+   - `env` set to
+     `{"DASK_DISTRIBUTED__WORKER__RESOURCES__TAU3MU_SLOT": "1"}` --
+     **required**. Without it, Dask schedules up to `worker_cores` jobs
+     concurrently on the same worker (it has no idea each job is itself a
+     full multi-core, multi-GB ACTS subprocess rather than a lightweight
+     function call), which reliably OOM-kills them (exit 137) the moment
+     more than one lands on the same worker at once. This makes each
+     worker advertise exactly one slot, and `run_dask_production.py` tags
+     every job with it so only one job ever runs per worker at a time.
    - note the cluster name it gives you, e.g. `cms.xxxxxxxx`
 
 2. Run the driver, filling in that cluster name:

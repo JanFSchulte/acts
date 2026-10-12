@@ -20,7 +20,8 @@ fi
 # Pinned to match whatever dask/distributed the facility's own base
 # environment ships, which is what the Gateway's own scheduler/workers run
 # -- a mismatch here is the single most likely source of a cluster that
-# comes up but can't actually run anything.
+# comes up but can't actually run anything. prometheus_client is required
+# by the facility's own monitoring; cluster creation is refused without it.
 BASE_DASK_VERSION=$(/opt/pixi/.pixi/envs/base-env/bin/python -c \
     "import dask; print(dask.__version__)" 2>/dev/null || true)
 if [ -z "$BASE_DASK_VERSION" ]; then
@@ -32,6 +33,6 @@ fi
 if [ ! -d "$STATE/daskenv" ]; then
     pixi init "$STATE/daskenv"
 fi
-(cd "$STATE/daskenv" && pixi add python=3.11 dask-gateway $DASK_SPEC)
+(cd "$STATE/daskenv" && pixi add python=3.11 dask-gateway prometheus_client $DASK_SPEC)
 
 echo "Environments ready under $STATE"

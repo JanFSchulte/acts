@@ -8,7 +8,15 @@ source the LCG view + ACTS build + ODD, run full_chain_odd_tau3mu.py, drop
 empty events, and tar the result to a shared output directory.
 
 Create the cluster first (e.g. via the Purdue AF agentic-interface's
-create_dask_cluster, pixi_project=<repo>/.purdue-af/daskenv), then:
+create_dask_cluster, pixi_project=<repo>/.purdue-af/daskenv), and pass
+env={"DASK_DISTRIBUTED__WORKER__RESOURCES__TAU3MU_SLOT": "1"} so each
+worker advertises exactly one "tau3mu_slot" -- this script tags every job
+with that resource so Dask never runs more than one job at a time per
+worker. Without it, Dask schedules up to worker_cores jobs concurrently
+on one worker (it has no idea each job is itself a full multi-core,
+multi-GB ACTS subprocess, not a lightweight function call), which
+reliably OOM-kills them (exit 137) once more than one lands on the same
+worker at once. Then:
 
     python3 run_dask_production.py --cluster-name <name> \
         --n-jobs 500 --events-per-job 2000 --pu 200
@@ -64,7 +72,14 @@ def main():
 
     job_indices = range(args.start_index, args.start_index + args.n_jobs)
     futures = [
-        client.submit(run_job, i, args.events_per_job, args.pu, pure=False)
+        client.submit(
+            run_job,
+            i,
+            args.events_per_job,
+            args.pu,
+            pure=False,
+            resources={"tau3mu_slot": 1},
+        )
         for i in job_indices
     ]
 
