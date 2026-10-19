@@ -53,6 +53,14 @@ parser.add_argument(
 parser.add_argument("--events", "-n", help="Number of events", type=int, default=100)
 parser.add_argument("--skip", "-s", help="Number of events", type=int, default=0)
 parser.add_argument("--rs", "-r", help="Random seed", type=int, default=42)
+parser.add_argument(
+    "--threads",
+    "-j",
+    help="Number of threads (-1: one per visible CPU, which inside a container "
+    "is the whole node's CPU count, not the container's CPU limit)",
+    type=int,
+    default=-1,
+)
 parser.add_argument("--edm4hep", help="Use edm4hep inputs", type=pathlib.Path)
 parser.add_argument(
     "--geant4", help="Use Geant4 instead of fatras", action="store_true"
@@ -181,7 +189,7 @@ rnd = acts.examples.RandomNumbers(seed=args.rs)
 s = acts.examples.Sequencer(
     events=args.events,
     skip=args.skip,
-    numThreads=1 if args.geant4 else -1,
+    numThreads=1 if args.geant4 else args.threads,
     outputDir=str(outputDir),
 )
 

@@ -44,14 +44,40 @@ export CPATH="$GCCENV/x86_64-conda-linux-gnu/sysroot/usr/include:$CPATH"
 source "$BUILD/python/setup.sh"
 source "$BUILD/thirdparty/OpenDataDetector/this_odd.sh"
 
+# Thread count: the ACTS Sequencer's default (-1) asks TBB for one thread per
+# visible CPU, and inside a Kubernetes pod that is the whole node (128-256 on
+# the AF's Dask nodes) -- the pod's CPU limit is a CFS quota, not a cpuset, so
+# neither nproc nor TBB sees it. Each of those threads keeps a full PU200 event
+# in flight, so memory scales with the node's core count rather than the
+# worker's, and the job is OOM-killed (exit 137) by its own worker's memory
+# limit; meanwhile hundreds of threads fight over a 4-core quota. Read the
+# quota from the cgroup instead (v2, then v1), capped at nproc -- run without
+# OMP_NUM_THREADS, which nproc obeys and Dask sets to 1 on every worker.
+# TAU3MU_THREADS overrides it.
+if [ -z "$TAU3MU_THREADS" ]; then
+    QUOTA="" PERIOD=""
+    if [ -r /sys/fs/cgroup/cpu.max ]; then
+        read -r QUOTA PERIOD < /sys/fs/cgroup/cpu.max
+    elif [ -r /sys/fs/cgroup/cpu/cpu.cfs_quota_us ]; then
+        QUOTA=$(cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us)
+        PERIOD=$(cat /sys/fs/cgroup/cpu/cpu.cfs_period_us)
+    fi
+    if [[ "$QUOTA" =~ ^[0-9]+$ ]] && [ "$QUOTA" -gt 0 ] && [ "${PERIOD:-0}" -gt 0 ]; then
+        TAU3MU_THREADS=$(( (QUOTA + PERIOD - 1) / PERIOD ))
+    fi
+    if [ -z "$TAU3MU_THREADS" ] || [ "$TAU3MU_THREADS" -gt "$(env -u OMP_NUM_THREADS nproc)" ]; then
+        TAU3MU_THREADS=$(env -u OMP_NUM_THREADS nproc)
+    fi
+fi
+
 cd "$ROOT/Examples/Scripts/Python"
 
 LOCALOUT=$(mktemp -d "/tmp/odd_output_tau3mu_run_${NJOB}.XXXXXX")
 trap 'rm -rf "$LOCALOUT"' EXIT
 
-echo "job=${NJOB} seed=${SEED} events=${NEVENTS} pu=${NPU} host=$(hostname) localout=${LOCALOUT}"
+echo "job=${NJOB} seed=${SEED} events=${NEVENTS} pu=${NPU} threads=${TAU3MU_THREADS} host=$(hostname) localout=${LOCALOUT}"
 
-python3.11 full_chain_odd_tau3mu.py --ttbar --ttbar-pu "${NPU}" --events "${NEVENTS}" --rs "${SEED}" \
+python3.11 full_chain_odd_tau3mu.py --ttbar --ttbar-pu "${NPU}" --events "${NEVENTS}" --rs "${SEED}" --threads "${TAU3MU_THREADS}" \
     --output "$LOCALOUT" --no-output-root --no-output-obj
 RC=$?
 if [ "$RC" -ne 0 ]; then

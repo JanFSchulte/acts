@@ -98,6 +98,13 @@ across a Dask Gateway cluster on Kubernetes. Each task runs
      more than one lands on the same worker at once. This makes each
      worker advertise exactly one slot, and `run_dask_production.py` tags
      every job with it so only one job ever runs per worker at a time.
+   - `run_one_job.sh` sizes each job's thread count to the worker's CPU
+     limit (read from the pod's cgroup), not to the CPUs the job can see:
+     inside a pod those are the whole node's 128-256 cores, and ACTS's
+     default of one thread per visible CPU keeps that many PU200 events in
+     memory at once -- far past an 8 GiB worker, so every job is OOM-killed
+     (exit 137) even with one job per worker. Set `TAU3MU_THREADS` in the
+     cluster `env` to override it.
    - note the cluster name it gives you, e.g. `cms.xxxxxxxx`
 
 2. Run the driver, filling in that cluster name:
