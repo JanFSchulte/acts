@@ -78,7 +78,7 @@ trap 'rm -rf "$LOCALOUT"' EXIT
 echo "job=${NJOB} seed=${SEED} events=${NEVENTS} pu=${NPU} threads=${TAU3MU_THREADS} host=$(hostname) localout=${LOCALOUT}"
 
 python3.11 full_chain_odd_tau3mu.py --ttbar --ttbar-pu "${NPU}" --events "${NEVENTS}" --rs "${SEED}" --threads "${TAU3MU_THREADS}" \
-    --output "$LOCALOUT" --no-output-root --no-output-obj
+    --output "$LOCALOUT" --no-output-root --no-output-obj --no-reco
 RC=$?
 if [ "$RC" -ne 0 ]; then
     echo "full_chain_odd_tau3mu.py failed with exit code $RC" >&2
@@ -112,7 +112,17 @@ for f in sorted(glob.glob(os.path.join(folder, "event*-particles_simulated.csv")
                 os.remove(p)
 PYEOF
 
+# Keep only what muon-system studies need: hits in the muon-system volumes
+# and the particles behind them (see slim_output.py). Tracker hits are ~85%
+# of hits.csv, which is itself most of the output.
+python3.11 "$HERE/slim_output.py" dir "$LOCALOUT"
+RC=$?
+if [ "$RC" -ne 0 ]; then
+    echo "slim_output.py failed with exit code $RC" >&2
+    exit "$RC"
+fi
+
 mkdir -p "$OUTBASE"
-tar -cf "$OUTBASE/odd_output_tau3mu_run_${NJOB}.tar" -C "$(dirname "$LOCALOUT")" "$(basename "$LOCALOUT")"
+tar -czf "$OUTBASE/odd_output_tau3mu_run_${NJOB}.tar.gz" -C "$(dirname "$LOCALOUT")" "$(basename "$LOCALOUT")"
 
 echo "DONE job=${NJOB} seed=${SEED}"

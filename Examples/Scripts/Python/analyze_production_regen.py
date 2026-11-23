@@ -20,7 +20,7 @@ def mass(px, py, pz, m):
 
 
 def process_tar(path, agg):
-    t = tarfile.open(path, mode="r:")
+    t = tarfile.open(path, mode="r:*")
     members = t.getmembers()
     by_event = defaultdict(dict)
     n_initial = 0
@@ -103,7 +103,7 @@ def process_tar(path, agg):
 
 
 def main():
-    files = sorted(glob.glob(PROD_DIR + "/odd_output_tau3mu_run_*.tar"))
+    files = sorted(glob.glob(PROD_DIR + "/odd_output_tau3mu_run_*.tar*"))
     agg = {
         "n_initial_events": 0,
         "n_nonempty_events": 0,

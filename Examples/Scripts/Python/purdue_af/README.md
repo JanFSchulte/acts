@@ -69,7 +69,7 @@ tarred to `.purdue-af/output/`):
 ```console
 $ cd /work/users/$USER/acts_tau3mu
 $ Examples/Scripts/Python/purdue_af/run_one_job.sh 0 10 20
-$ tar -tf .purdue-af/output/odd_output_tau3mu_run_0.tar
+$ tar -tzf .purdue-af/output/odd_output_tau3mu_run_0.tar.gz
 ```
 
 (the three arguments are job index, number of events, and pileup -- the
@@ -119,6 +119,13 @@ across a Dask Gateway cluster on Kubernetes. Each task runs
    500 jobs x 2000 events x PU200, so they can be omitted to match it
    exactly. Output tars land in `.purdue-af/output/` (override with the
    `TAU3MU_OUTPUT_DIR` environment variable).
+
+Output is slimmed for muon-system studies before it is tarred: only hits in
+the muon-system volumes (4, 36, 37) are kept, the particle tables keep only
+particles that hit them plus the signal vertex, reconstruction is switched
+off (`--no-reco`), and the tar is gzipped -- about 25x smaller than the full
+CSV output. `slim_output.py` does this, and can also slim an existing
+production tar (`slim_output.py tar <in.tar> <out.tar.gz>`).
 
 At PU200 this runs at roughly 1.75 s/event (measured on a 4-core worker),
 so size the worker count and `--n-jobs`/`--events-per-job` split to the
