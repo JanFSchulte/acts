@@ -129,7 +129,15 @@ parser.add_argument(
 )
 parser.add_argument(
     "--reco",
-    help="Switch reco on/off",
+    help="Switch reco on/off (default: off with --muon-system-only, on otherwise)",
+    default=None,
+    action=argparse.BooleanOptionalAction,
+)
+parser.add_argument(
+    "--muon-system-only",
+    help="Slim the CSV output to muon-system hits and the particles behind "
+    "them, dropping tracker hits and digitization output (see "
+    "muon_system_slim.py)",
     default=True,
     action=argparse.BooleanOptionalAction,
 )
@@ -153,6 +161,8 @@ parser.add_argument(
 )
 
 args = parser.parse_args()
+if args.reco is None:
+    args.reco = not args.muon_system_only
 
 
 
@@ -468,3 +478,8 @@ if args.reco:
     )
 
 s.run()
+
+if args.muon_system_only and args.output_csv:
+    from muon_system_slim import slim_dir
+
+    slim_dir(outputDir, keep_reco=args.reco)

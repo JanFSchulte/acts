@@ -120,12 +120,15 @@ across a Dask Gateway cluster on Kubernetes. Each task runs
    exactly. Output tars land in `.purdue-af/output/` (override with the
    `TAU3MU_OUTPUT_DIR` environment variable).
 
-Output is slimmed for muon-system studies before it is tarred: only hits in
-the muon-system volumes (4, 36, 37) are kept, the particle tables keep only
-particles that hit them plus the signal vertex, reconstruction is switched
-off (`--no-reco`), and the tar is gzipped -- about 25x smaller than the full
-CSV output. `slim_output.py` does this, and can also slim an existing
-production tar (`slim_output.py tar <in.tar> <out.tar.gz>`).
+Output is slimmed for muon-system studies: only hits in the muon-system
+volumes (4, 36, 37) are kept, the particle tables keep only particles that
+hit them plus the signal vertex, digitization output is dropped,
+reconstruction is off, and the tar is gzipped -- about 25x smaller than the
+full CSV output. `full_chain_odd_tau3mu.py` and `full_chain_odd_minbias.py`
+do this themselves (`--muon-system-only`, on by default; pass
+`--no-muon-system-only` for the full output) via `../muon_system_slim.py`,
+which can also slim an existing production tar
+(`muon_system_slim.py tar <in.tar> <out.tar.gz>`).
 
 At PU200 this runs at roughly 1.75 s/event (measured on a 4-core worker),
 so size the worker count and `--n-jobs`/`--events-per-job` split to the

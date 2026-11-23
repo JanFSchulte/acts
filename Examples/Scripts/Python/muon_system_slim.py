@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Slim tau3mu production output down to what muon-system studies need.
+"""Slim ODD tau3mu / minimum-bias output down to what muon-system studies need.
 
 Per event this keeps
   - hits.csv rows in the muon-system volumes (MUON_VOLUMES), byte-for-byte
@@ -7,18 +7,22 @@ Per event this keeps
   - particles.csv / particles_simulated.csv rows for particles that left a
     hit there, plus every particle of the signal vertex (SIGNAL_PV), which
     downstream code uses to find the tau3mu muons,
-and drops the tracker-only reconstruction outputs (measurements, cells,
-seeds, tracks) and any OBJ/ROOT files. Anything else (timing.csv, ...) is
-kept unchanged. Standard library only, so it runs under the LCG view's
-python3.11 on a worker as well as anywhere else.
+and drops the tracker-only digitization outputs (measurements, cells) and
+the reconstruction outputs (seeds, tracks). Anything else (timing.csv, ...)
+is kept unchanged. Events whose particles_simulated.csv is empty (rejected by
+the tau3mu filter) are dropped altogether. Standard library only, so it runs
+under the LCG view's python3.11 on a worker as well as anywhere else.
 
-Two modes:
+full_chain_odd_tau3mu.py and full_chain_odd_minbias.py call slim_dir() on
+their own output unless run with --no-muon-system-only. From the command
+line:
 
-    slim_output.py dir <output_dir>
-        slim a job's output directory in place (used by run_one_job.sh)
+    muon_system_slim.py dir <output_dir>
+        slim an output directory in place
 
-    slim_output.py tar <input.tar> <output.tar.gz>
-        stream an existing production tar into a slimmed, gzipped one
+    muon_system_slim.py tar <input.tar> <output.tar.gz>
+        stream an existing production tar into a slimmed, gzipped one; this
+        also drops OBJ and ROOT files, which hold every volume
 """
 import argparse
 import io
@@ -31,20 +35,22 @@ MUON_VOLUMES = {4, 36, 37}
 # Pythia8 vertex the tau3mu signal is generated at.
 SIGNAL_PV = 1
 
-DROP_SUFFIXES = (
+DIGI_SUFFIXES = (
     "-cells.csv",
     "-measurements.csv",
     "-measurement-simhit-map.csv",
+)
+RECO_SUFFIXES = (
     "-seed.csv",
     "-tracks_ckf.csv",
     "-tracks_ambi.csv",
     "-track_parameters_ckf.csv",
     "-track_parameters_ambi.csv",
-    ".obj",
-    ".root",
 )
+VIS_SUFFIXES = (".obj", ".root")
 HITS_SUFFIX = "-hits.csv"
 PARTICLE_SUFFIXES = ("-particles.csv", "-particles_simulated.csv")
+SIMULATED_SUFFIX = "-particles_simulated.csv"
 # hits.csv and particles*.csv both start with these five columns.
 N_KEY_COLUMNS = 5
 
@@ -79,13 +85,32 @@ def filter_particles(text, keys):
     return "".join(out)
 
 
-def slim_dir(folder):
+def empty_events(folder, names):
+    empty = set()
+    for name in names:
+        if name.endswith(SIMULATED_SUFFIX):
+            with open(os.path.join(folder, name)) as fh:
+                fh.readline()
+                if not fh.readline():
+                    empty.add(event_of(name))
+    return empty
+
+
+def slim_dir(folder, keep_reco=False):
+    """Slim an output directory in place. OBJ and ROOT files are left alone;
+    their own --output-obj/--output-root switches decide whether they exist.
+    """
+    folder = str(folder)
+    drop = DIGI_SUFFIXES + (() if keep_reco else RECO_SUFFIXES)
     names = sorted(os.listdir(folder))
+    empty = empty_events(folder, names)
     keys_by_event = {}
     n_in = n_out = 0
     for name in names:
         path = os.path.join(folder, name)
-        if name.endswith(DROP_SUFFIXES):
+        if name.startswith("event") and event_of(name) in empty:
+            os.remove(path)
+        elif name.endswith(drop):
             os.remove(path)
         elif name.endswith(HITS_SUFFIX):
             with open(path) as fh:
@@ -96,13 +121,16 @@ def slim_dir(folder):
             n_in += a
             n_out += b
     for name in names:
-        if name.endswith(PARTICLE_SUFFIXES):
+        if name.endswith(PARTICLE_SUFFIXES) and event_of(name) not in empty:
             path = os.path.join(folder, name)
             with open(path) as fh:
                 kept = filter_particles(fh.read(), keys_by_event.get(event_of(name), set()))
             with open(path, "w") as fh:
                 fh.write(kept)
-    print(f"slim: {len(keys_by_event)} events, kept {n_out}/{n_in} hits")
+    print(
+        f"muon_system_slim: kept {len(keys_by_event)} events "
+        f"(dropped {len(empty)} empty), {n_out}/{n_in} hits"
+    )
 
 
 def add_text(tar, member, text):
@@ -117,6 +145,7 @@ def add_text(tar, member, text):
 def slim_tar(src, dst):
     # Members come in directory order, not grouped by event, so particle
     # files are held back until every hits file has been seen.
+    drop = DIGI_SUFFIXES + RECO_SUFFIXES + VIS_SUFFIXES
     tmp = dst + ".part"
     keys_by_event = {}
     pending = []
@@ -125,7 +154,7 @@ def slim_tar(src, dst):
         for m in tin:
             if not m.isfile():
                 tout.addfile(m)
-            elif m.name.endswith(DROP_SUFFIXES):
+            elif m.name.endswith(drop):
                 continue
             elif m.name.endswith(HITS_SUFFIX):
                 kept, keys, a, b = filter_hits(tin.extractfile(m).read().decode())
@@ -140,8 +169,7 @@ def slim_tar(src, dst):
         for m, text in pending:
             add_text(tout, m, filter_particles(text, keys_by_event.get(event_of(m.name), set())))
     os.replace(tmp, dst)
-    print(f"slim: {src} -> {dst}: {len(keys_by_event)} events, kept {n_out}/{n_in} hits")
-    return {"events": len(keys_by_event), "hits_in": n_in, "hits_out": n_out}
+    print(f"muon_system_slim: {src} -> {dst}: {len(keys_by_event)} events, kept {n_out}/{n_in} hits")
 
 
 def main():

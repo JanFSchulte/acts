@@ -78,50 +78,16 @@ trap 'rm -rf "$LOCALOUT"' EXIT
 echo "job=${NJOB} seed=${SEED} events=${NEVENTS} pu=${NPU} threads=${TAU3MU_THREADS} host=$(hostname) localout=${LOCALOUT}"
 
 python3.11 full_chain_odd_tau3mu.py --ttbar --ttbar-pu "${NPU}" --events "${NEVENTS}" --rs "${SEED}" --threads "${TAU3MU_THREADS}" \
-    --output "$LOCALOUT" --no-output-root --no-output-obj --no-reco
+    --output "$LOCALOUT" --no-output-root --no-output-obj
 RC=$?
 if [ "$RC" -ne 0 ]; then
     echo "full_chain_odd_tau3mu.py failed with exit code $RC" >&2
     exit "$RC"
 fi
 
-# Drop events with no simulated particles (tau3mu filter rejected them),
-# same intent as cleanEmptyEvents.py but driven off the files that actually
-# exist rather than a hardcoded event-count loop.
-python3.11 - "$LOCALOUT" <<'PYEOF'
-import csv
-import glob
-import os
-import sys
-
-folder = sys.argv[1]
-suffixes = [
-    "cells.csv", "hits.csv", "hits.obj", "hits_trajectory.obj",
-    "measurements.csv", "measurement-simhit-map.csv", "particles.csv",
-    "particles_simulated.csv", "seed.csv", "track_parameters_ambi.csv",
-    "track_parameters_ckf.csv", "tracks_ambi.csv", "tracks_ckf.csv",
-]
-for f in sorted(glob.glob(os.path.join(folder, "event*-particles_simulated.csv"))):
-    with open(f, newline="") as fh:
-        rows = sum(1 for _ in csv.reader(fh))
-    if rows == 1:  # header only, no particles survived
-        prefix = f[: -len("particles_simulated.csv")]
-        for suffix in suffixes:
-            p = prefix + suffix
-            if os.path.exists(p):
-                os.remove(p)
-PYEOF
-
-# Keep only what muon-system studies need: hits in the muon-system volumes
-# and the particles behind them (see slim_output.py). Tracker hits are ~85%
-# of hits.csv, which is itself most of the output.
-python3.11 "$HERE/slim_output.py" dir "$LOCALOUT"
-RC=$?
-if [ "$RC" -ne 0 ]; then
-    echo "slim_output.py failed with exit code $RC" >&2
-    exit "$RC"
-fi
-
+# full_chain_odd_tau3mu.py has already dropped events the tau3mu filter
+# rejected and slimmed the rest to muon-system hits (--muon-system-only, on
+# by default; see muon_system_slim.py).
 mkdir -p "$OUTBASE"
 tar -czf "$OUTBASE/odd_output_tau3mu_run_${NJOB}.tar.gz" -C "$(dirname "$LOCALOUT")" "$(basename "$LOCALOUT")"
 

@@ -19,18 +19,16 @@ for i in range(0,2000):
         reader = csv.reader(file)
         row_count = sum(1 for row in reader)
         if row_count == 1:
-            os.remove(folder + f'event00000{i:04d}-cells.csv')
-            os.remove(folder + f'event00000{i:04d}-hits.csv')
-            os.remove(folder + f'event00000{i:04d}-hits.obj')
-            os.remove(folder + f'event00000{i:04d}-hits_trajectory.obj')
-            os.remove(folder + f'event00000{i:04d}-measurements.csv')
-            os.remove(folder + f'event00000{i:04d}-measurement-simhit-map.csv')
-            os.remove(folder + f'event00000{i:04d}-particles.csv')
-            os.remove(folder + f'event00000{i:04d}-particles_simulated.csv')
-            os.remove(folder + f'event00000{i:04d}-seed.csv')
-            os.remove(folder + f'event00000{i:04d}-track_parameters_ambi.csv')
-            os.remove(folder + f'event00000{i:04d}-track_parameters_ckf.csv')
-            os.remove(folder + f'event00000{i:04d}-tracks_ambi.csv')
-            os.remove(folder + f'event00000{i:04d}-tracks_ckf.csv')
-
-
+            # Not every file exists: OBJ output is usually off, and
+            # full_chain_odd_tau3mu.py's --muon-system-only slimming (on by
+            # default) has already removed empty events and tracker output.
+            for suffix in [
+                "cells.csv", "hits.csv", "hits.obj", "hits_trajectory.obj",
+                "measurements.csv", "measurement-simhit-map.csv",
+                "particles.csv", "particles_simulated.csv", "seed.csv",
+                "track_parameters_ambi.csv", "track_parameters_ckf.csv",
+                "tracks_ambi.csv", "tracks_ckf.csv",
+            ]:
+                path = folder + f'event00000{i:04d}-' + suffix
+                if os.path.exists(path):
+                    os.remove(path)
