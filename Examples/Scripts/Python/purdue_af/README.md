@@ -120,6 +120,17 @@ across a Dask Gateway cluster on Kubernetes. Each task runs
    exactly. Output tars land in `.purdue-af/output/` (override with the
    `TAU3MU_OUTPUT_DIR` environment variable).
 
+   For the minimum-bias background sample add `--sample minbias`, with a
+   `--start-index` range that doesn't overlap the signal jobs' (each job's
+   seed is derived from its index), e.g. `--sample minbias --start-index
+   300000`. Its tars are named `odd_output_minbias_run_<N>.tar.gz`.
+
+   Jobs run with ACTS's floating-point-exception monitoring switched off
+   (`ACTS_SEQUENCER_DISABLE_FPEMON=1` in `run_one_job.sh`). This build can't
+   resolve stack traces to source lines, so ACTS's masks for known-benign
+   FPEs never match, and a single harmless underflow in Fatras would fail an
+   entire job ("Encountered 1 unmasked FPEs").
+
 Output is slimmed for muon-system studies: only hits in the muon-system
 volumes (4, 36, 37) are kept, the particle tables keep only particles that
 hit them plus the signal vertex, digitization output is dropped,

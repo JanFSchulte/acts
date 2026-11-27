@@ -21,6 +21,10 @@ worker at once. Then:
     python3 run_dask_production.py --cluster-name <name> \
         --n-jobs 500 --events-per-job 2000 --pu 200
 
+Add --sample minbias for the background sample (full_chain_odd_minbias.py);
+give it a --start-index range disjoint from the signal jobs' so the per-job
+seeds differ.
+
 Gateway() with no arguments connects to the Kubernetes backend; pass
 --gateway-address/--proxy-address for the Slurm (Hammer) backend instead.
 """
@@ -32,10 +36,10 @@ import time
 RUN_SCRIPT = str(pathlib.Path(__file__).resolve().parent / "run_one_job.sh")
 
 
-def run_job(job_index, n_events, pu):
+def run_job(job_index, n_events, pu, sample):
     t0 = time.time()
     proc = subprocess.run(
-        ["bash", RUN_SCRIPT, str(job_index), str(n_events), str(pu)],
+        ["bash", RUN_SCRIPT, str(job_index), str(n_events), str(pu), sample],
         capture_output=True,
         text=True,
     )
@@ -57,6 +61,7 @@ def main():
     ap.add_argument("--start-index", type=int, default=0)
     ap.add_argument("--events-per-job", type=int, default=2000)
     ap.add_argument("--pu", type=int, default=200)
+    ap.add_argument("--sample", choices=["tau3mu", "minbias"], default="tau3mu")
     args = ap.parse_args()
 
     from dask_gateway import Gateway
@@ -77,6 +82,7 @@ def main():
             i,
             args.events_per_job,
             args.pu,
+            args.sample,
             pure=False,
             resources={"tau3mu_slot": 1},
         )

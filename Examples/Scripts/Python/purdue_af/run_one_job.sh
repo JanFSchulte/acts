@@ -1,13 +1,24 @@
 #!/bin/bash
-# Runs one tau3mu production job: the Dask-task equivalent of
-# ../acts_tau3mu_submit.sh's SLURM body. Called by run_dask_production.py on
-# a worker, but also runnable by hand for a quick local test.
+# Runs one tau3mu (signal) or minimum-bias (background) production job: the
+# Dask-task equivalent of ../acts_tau3mu_submit.sh's SLURM body. Called by
+# run_dask_production.py on a worker, but also runnable by hand for a quick
+# local test.
 #
-# Usage: run_one_job.sh <job_index> [n_events] [pileup]
+# Usage: run_one_job.sh <job_index> [n_events] [pileup] [tau3mu|minbias]
 
 NJOB=$1
 NEVENTS=${2:-2000}
 NPU=${3:-200}
+SAMPLE=${4:-tau3mu}
+
+case "$SAMPLE" in
+    tau3mu) SIM_SCRIPT=full_chain_odd_tau3mu.py ;;
+    minbias) SIM_SCRIPT=full_chain_odd_minbias.py ;;
+    *)
+        echo "unknown sample: $SAMPLE (expected tau3mu or minbias)" >&2
+        exit 2
+        ;;
+esac
 
 # Same seed derivation as acts_tau3mu_submit.sh: hash the job index (Murmur3
 # fmix32) instead of passing it directly, since RandomNumbers::generateSeed
@@ -70,25 +81,35 @@ if [ -z "$TAU3MU_THREADS" ]; then
     fi
 fi
 
+# FPE monitoring off: the Sequencer fails the whole job if any floating-point
+# exception is not covered by one of ACTS's FPE masks, but masks are matched
+# by source file and line, which this Release build (no debug info, no
+# libbacktrace in this toolchain) cannot resolve -- so no mask ever matches.
+# Fatras's known-benign underflow in pow() (masked upstream in
+# SimulationActor.hpp, #2346) then shows up in roughly one PU200 event in a
+# few hundred and throws away every event of the job. Monitoring only
+# observes; the simulated events are identical with it off.
+export ACTS_SEQUENCER_DISABLE_FPEMON=1
+
 cd "$ROOT/Examples/Scripts/Python"
 
-LOCALOUT=$(mktemp -d "/tmp/odd_output_tau3mu_run_${NJOB}.XXXXXX")
+LOCALOUT=$(mktemp -d "/tmp/odd_output_${SAMPLE}_run_${NJOB}.XXXXXX")
 trap 'rm -rf "$LOCALOUT"' EXIT
 
-echo "job=${NJOB} seed=${SEED} events=${NEVENTS} pu=${NPU} threads=${TAU3MU_THREADS} host=$(hostname) localout=${LOCALOUT}"
+echo "sample=${SAMPLE} job=${NJOB} seed=${SEED} events=${NEVENTS} pu=${NPU} threads=${TAU3MU_THREADS} host=$(hostname) localout=${LOCALOUT}"
 
-python3.11 full_chain_odd_tau3mu.py --ttbar --ttbar-pu "${NPU}" --events "${NEVENTS}" --rs "${SEED}" --threads "${TAU3MU_THREADS}" \
+python3.11 "$SIM_SCRIPT" --ttbar --ttbar-pu "${NPU}" --events "${NEVENTS}" --rs "${SEED}" --threads "${TAU3MU_THREADS}" \
     --output "$LOCALOUT" --no-output-root --no-output-obj
 RC=$?
 if [ "$RC" -ne 0 ]; then
-    echo "full_chain_odd_tau3mu.py failed with exit code $RC" >&2
+    echo "$SIM_SCRIPT failed with exit code $RC" >&2
     exit "$RC"
 fi
 
-# full_chain_odd_tau3mu.py has already dropped events the tau3mu filter
-# rejected and slimmed the rest to muon-system hits (--muon-system-only, on
+# $SIM_SCRIPT has already dropped events the tau3mu filter rejected (if
+# any) and slimmed the rest to muon-system hits (--muon-system-only, on
 # by default; see muon_system_slim.py).
 mkdir -p "$OUTBASE"
-tar -czf "$OUTBASE/odd_output_tau3mu_run_${NJOB}.tar.gz" -C "$(dirname "$LOCALOUT")" "$(basename "$LOCALOUT")"
+tar -czf "$OUTBASE/odd_output_${SAMPLE}_run_${NJOB}.tar.gz" -C "$(dirname "$LOCALOUT")" "$(basename "$LOCALOUT")"
 
 echo "DONE job=${NJOB} seed=${SEED}"
